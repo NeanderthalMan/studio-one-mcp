@@ -59,3 +59,19 @@ test('round trip, sequential requests, and device errors', async () => {
     stop();
   }
 });
+
+test('times out with a helpful message when nobody answers', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 's1mb-'));
+  writeFileSync(join(dir, 'status.json'), JSON.stringify({ protocol: 1, heartbeat: 1 }));
+  let nudges = 0;
+  await assert.rejects(call('ping', {}, { dir, timeoutMs: 400, nudge: () => nudges++ }), /did not answer "ping" within 400ms/);
+  assert.ok(nudges >= 2, 'keeps ringing while waiting');
+});
+
+test('a doorbell failure (no MIDI port) surfaces as the error', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 's1mb-'));
+  writeFileSync(join(dir, 'status.json'), JSON.stringify({ protocol: 1, heartbeat: 1 }));
+  await assert.rejects(call('ping', {}, { dir, nudge: () => { throw new Error('No MIDI output matching "IAC"'); } }), /No MIDI output/);
+  // and the queue is not poisoned for the next call
+  await assert.rejects(call('ping', {}, { dir, timeoutMs: 100, nudge: () => {} }), /did not answer/);
+});

@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
-    "install-device": "node scripts/install-device.js"
+    "install-device": "node scripts/install-device.js",
+    "test:live": "node --test --test-concurrency=1 test/live/*.test.js"
   },
   "engines": {
     "node": ">=20"

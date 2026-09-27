@@ -39,8 +39,14 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         super.paramChanged(param);
     }
 
+    // Never throw out of a component method. Studio One wraps calls into the
+    // component and turns any escaping exception into a modal "Scripting Error"
+    // dialog, even when the caller has a try/catch. Failures are returned as
+    // { error } values and BridgeCore.js rethrows them on its own side.
     channelElements() {
-        const bank = this.hostComponent.model.root.find("mixer").find("channels");
+        const model = this.hostComponent && this.hostComponent.model;
+        if (!model) return { error: "surface model not available" };
+        const bank = model.root.find("mixer").find("channels");
         const out = [];
         for (let i = 0; i < 256; i++) {
             const el = bank.getElement(i);
@@ -56,7 +62,9 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
     }
 
     channels() {
-        return this.channelElements().map(c => ({
+        const els = this.channelElements();
+        if (els.error) return els;
+        return els.map(c => ({
             index: c.index,
             label: c.label,
             type: this.readParam(c.el, PreSonus.ParamID.kChannelType),
@@ -71,9 +79,11 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
     setChannel(args) {
         const fields = { volume: PreSonus.ParamID.kVolume, pan: PreSonus.ParamID.kPan, mute: "mute", solo: "solo", recordArmed: PreSonus.ParamID.kRecord };
         const param = fields[args.field];
-        if (!param) throw new Error("field must be one of " + Object.keys(fields).join(", "));
-        const matches = this.channelElements().filter(c => c.label === args.channel);
-        if (matches.length !== 1) throw new Error(matches.length ? "channel name is ambiguous: " + args.channel : "no channel named " + args.channel);
+        if (!param) return { error: "field must be one of " + Object.keys(fields).join(", ") };
+        const els = this.channelElements();
+        if (els.error) return els;
+        const matches = els.filter(c => c.label === args.channel);
+        if (matches.length !== 1) return { error: matches.length ? "channel name is ambiguous: " + args.channel : "no channel named " + args.channel };
         const el = matches[0].el;
         const before = this.readParam(el, param);
         el.setParamValue(param, args.value);

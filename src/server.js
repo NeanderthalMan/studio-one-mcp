@@ -39,15 +39,17 @@ server.tool(
   'song_read',
   'Read a Studio One song from its .song file: tempo, time signature, markers, arranger sections, tracks with takes/clips (bar, beat and seconds), mixer channels with volume/pan/mute/solo and plug-in inserts, and media files. Reflects the last save, not unsaved edits.',
   {
-    song: z.string().describe('Song title (or unique part of it) or absolute path to a .song file'),
+    song: z.string().describe('Song title, part of one (newest match wins), or absolute path to a .song file'),
     detail: z.enum(['summary', 'full']).optional().describe('summary (default): one line per track. full: every take and clip.'),
     track: z.string().optional().describe('With detail=full, only include tracks whose name contains this'),
   },
   guard(({ song, detail = 'summary', track }) => {
-    const s = readSong(resolveSong(song));
-    if (detail === 'summary') return summarizeSong(s);
-    if (track) s.tracks = s.tracks.filter((t) => t.name.toLowerCase().includes(track.toLowerCase()));
-    return s;
+    const { path, otherMatches } = resolveSong(song);
+    const s = readSong(path);
+    const out = detail === 'summary' ? summarizeSong(s) : s;
+    if (detail !== 'summary' && track) out.tracks = out.tracks.filter((t) => t.name.toLowerCase().includes(track.toLowerCase()));
+    if (otherMatches.length) out.otherMatches = otherMatches; // picked the newest; these also matched
+    return out;
   }),
 );
 
@@ -56,7 +58,7 @@ server.tool(
   "List a song's autosaves and backups in its History folder (newest first). Each path can be passed to song_read to compare versions.",
   { song: z.string().describe('Song title or .song path') },
   guard(({ song }) => {
-    const history = join(songFolder(resolveSong(song)), 'History');
+    const history = join(songFolder(resolveSong(song).path), 'History');
     if (!existsSync(history)) return [];
     return readdirSync(history)
       .filter((f) => f.endsWith('.song'))
@@ -101,20 +103,21 @@ server.tool(
 
 server.tool(
   'live_command',
-  'Run any Studio One command by category and name, exactly as listed in Studio One → Keyboard Shortcuts (e.g. Transport/Start, Transport/Stop, Transport/Record, Edit/Undo, Song/Save, View/Mixer). Use live_list_commands to discover names.',
+  'Run any Studio One command by category and name, exactly as listed in Studio One → Keyboard Shortcuts (e.g. Transport/Start, Transport/Stop, Transport/Record, Edit/Undo, File/Save, View/Console). Use live_list_commands to discover names. With check_only, only reports whether the command is currently enabled, without running it.',
   {
     category: z.string(),
     name: z.string(),
+    check_only: z.boolean().optional().describe('Report {enabled} without executing'),
     args: z.array(z.any()).optional().describe('Optional flat [key, value, key, value…] command arguments'),
   },
-  guard((a) => call('command', a)),
+  guard(({ check_only, ...a }) => call('command', { ...a, checkOnly: !!check_only })),
 );
 
 server.tool(
   'live_list_commands',
-  'List Studio One commands available to live_command, optionally filtered by a substring.',
-  { filter: z.string().optional() },
-  guard((a) => call('listCommands', a, { timeoutMs: 15000 })),
+  'List Studio One commands available to live_command (about 1,000 on Studio One 5), optionally filtered by a substring. with_state adds whether each is enabled right now; many need a selection or an open editor.',
+  { filter: z.string().optional(), with_state: z.boolean().optional() },
+  guard(({ filter, with_state }) => call('listCommands', { filter, withState: !!with_state }, { timeoutMs: 15000 })),
 );
 
 server.tool(

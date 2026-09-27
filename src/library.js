@@ -43,11 +43,14 @@ export function songFolder(path) {
   return basename(d) === 'History' ? dirname(d) : d;
 }
 
+// Returns { path, otherMatches }. An exact title wins; otherwise the most
+// recently modified match (listSongs is newest-first), naming the others so the
+// caller can tell the user which song was picked.
 export function resolveSong(song) {
-  if (song.endsWith('.song') && existsSync(song)) return song;
+  if (song.endsWith('.song') && existsSync(song)) return { path: song, otherMatches: [] };
   const hits = listSongs({ query: song, limit: 1000 });
-  const exact = hits.filter((h) => h.title.toLowerCase() === song.toLowerCase());
-  if (exact.length === 1 || hits.length === 1) return (exact[0] || hits[0]).path;
   if (!hits.length) throw new Error(`No song matching "${song}". Use song_list to see titles, or pass a full .song path.`);
-  throw new Error(`"${song}" matches ${hits.length} songs: ${hits.slice(0, 10).map((h) => h.title).join(', ')}. Be more specific or pass the path.`);
+  const exact = hits.find((h) => h.title.toLowerCase() === song.toLowerCase());
+  const pick = exact || hits[0];
+  return { path: pick.path, otherMatches: exact ? [] : hits.slice(1).map((h) => h.title) };
 }

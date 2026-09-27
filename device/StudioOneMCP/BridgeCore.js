@@ -123,8 +123,8 @@ class Bridge {
     handle(op, args) {
         switch (op) {
             case "ping": return { pong: true, session: this.session, time: Date.now() };
-            case "channels": return this.component.channels();
-            case "setChannel": return this.component.setChannel(args);
+            case "channels": return this.fromComponent(c => c.channels());
+            case "setChannel": return this.fromComponent(c => c.setChannel(args));
             case "command": return this.command(args);
             case "listCommands": return this.listCommands(args);
             case "eval": return this.evaluate(args);
@@ -132,11 +132,26 @@ class Bridge {
         }
     }
 
+    // Component methods report failure as { error } (see BridgeComponent.js):
+    // an exception thrown inside them becomes a Studio One error dialog.
+    fromComponent(fn) {
+        if (!this.component) throw new Error("mixer not available (no control-surface component)");
+        const r = fn(this.component);
+        if (r && !Array.isArray(r) && typeof r.error === "string") throw new Error(r.error);
+        return r;
+    }
+
+    // checkOnly asks whether the command is currently enabled without running it
+    // (the same query Studio One makes to grey out menu items).
     command(args) {
         if (!args.category || !args.name) throw new Error("category and name are required");
+        const cmds = Host.GUI.Commands;
+        if (!cmds.findCommand(String(args.category), String(args.name)))
+            throw new Error("unknown command: " + args.category + "/" + args.name + " (see listCommands)");
+        if (args.checkOnly) return { enabled: !!cmds.interpretCommand(args.category, args.name, true) };
         const ok = args.args
-            ? Host.GUI.Commands.interpretCommand(args.category, args.name, false, Host.Attributes(args.args))
-            : Host.GUI.Commands.interpretCommand(args.category, args.name);
+            ? cmds.interpretCommand(args.category, args.name, false, Host.Attributes(args.args))
+            : cmds.interpretCommand(args.category, args.name);
         return { executed: !!ok };
     }
 
@@ -148,7 +163,9 @@ class Bridge {
             const c = it.next();
             if (!c) break;
             const entry = { category: String(c.category), name: String(c.name) };
-            if (!filter || (entry.category + " " + entry.name).toLowerCase().indexOf(filter) >= 0) out.push(entry);
+            if (filter && (entry.category + " " + entry.name).toLowerCase().indexOf(filter) < 0) continue;
+            if (args.withState) entry.enabled = !!Host.GUI.Commands.interpretCommand(entry.category, entry.name, true);
+            out.push(entry);
         }
         return out;
     }
