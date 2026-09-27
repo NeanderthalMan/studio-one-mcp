@@ -1,15 +1,14 @@
-// The bridge's doorbell: one MIDI CC on the port the MCP Bridge device listens to.
+// The bridge's doorbell: a note press on the port the MCP Bridge device listens to.
 // Studio One 5 gives scripts no usable timer, so the device only wakes up when a
-// mapped control changes. We alternate 0/127 so every nudge is a change.
+// mapped control changes; each press toggles the component's bridgeTick param.
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const CC = 119; // must match <MidiMessage address="#77"> in StudioOneMCP.surface.xml
+const NOTE = 119; // must match <MidiMessage status="#90" address="#77"> in StudioOneMCP.surface.xml
 const PORT = process.env.STUDIO_ONE_MCP_MIDI_PORT || 'IAC';
 
 let output = null;
 let portName = null;
-let state = 0;
 
 function open() {
   if (output) return output;
@@ -38,8 +37,9 @@ function open() {
 }
 
 export function nudge() {
-  state = state ? 0 : 127;
-  open().sendMessage([0xb0, CC, state]);
+  const out = open();
+  out.sendMessage([0x90, NOTE, 127]); // press
+  out.sendMessage([0x90, NOTE, 0]); // release
 }
 
 export const midiPort = () => portName;

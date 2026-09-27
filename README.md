@@ -61,7 +61,7 @@ To remove it: `node scripts/install-device.js --uninstall`, then remove the devi
 
 ## How the live bridge works
 
-Studio One runs control-surface scripts in an embedded SpiderMonkey engine. Scripts can read and write files but cannot open sockets, so the bridge is a folder. Studio One 5 also gives scripts no usable timer, so the bridge is event-driven. After writing a request, the server sends MIDI CC 119 on a virtual MIDI bus (the macOS IAC Driver). The device's surface file maps that CC to a component parameter, and the component answers on each change.
+Studio One runs control-surface scripts in an embedded SpiderMonkey engine. Scripts can read and write files but cannot open sockets, so the bridge is a folder. Studio One 5 also gives scripts no usable timer, so the bridge is event-driven. After writing a request, the server presses MIDI note 119 on a virtual MIDI bus (the macOS IAC Driver). The device's surface file maps that note, as a trigger control, to a toggle on a component parameter, and the component answers on each change.
 
 ```
 status.json    device → client   session id; refreshed whenever the bridge runs
@@ -69,7 +69,7 @@ request.json   client → device   {id, op, args}, written atomically (tmp + ren
 response.json  device → client   {id, ok, result | error}
 ```
 
-The client re-sends the CC every 150 ms until a response arrives. The component answers each request id once, and the client sends one request at a time.
+The client re-sends the press every 150 ms until a response arrives. The component answers each request id once, and the client sends one request at a time.
 
 Security: anything that can write to the mailbox folder, which means anything running as your user, can drive Studio One through it. With `--allow-eval`, it can also run arbitrary script inside Studio One. Keep the folder local, and leave eval off unless you are exploring.
 
