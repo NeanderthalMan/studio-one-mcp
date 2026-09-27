@@ -8,7 +8,8 @@ const STALE_MS = 6000; // the device heartbeats every 2s
 
 const readJson = (p) => {
   try {
-    return JSON.parse(readFileSync(p, 'utf8'));
+    // Studio One's createTextFile writes a UTF-8 BOM.
+    return JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
   } catch {
     return null;
   }

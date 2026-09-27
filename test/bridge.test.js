@@ -9,7 +9,7 @@ import { bridgeStatus, call } from '../src/bridge.js';
 
 function fakeDevice(dir, handle) {
   let lastId = null;
-  const beat = () => writeFileSync(join(dir, 'status.json'), JSON.stringify({ protocol: 1, session: 'abc', heartbeat: Date.now() }));
+  const beat = () => writeFileSync(join(dir, 'status.json'), '\uFEFF' + JSON.stringify({ protocol: 1, session: 'abc', heartbeat: Date.now() }));
   beat();
   const timer = setInterval(() => {
     beat();
@@ -27,7 +27,7 @@ function fakeDevice(dir, handle) {
     } catch (e) {
       res = { id: req.id, ok: false, error: e.message };
     }
-    writeFileSync(join(dir, 'response.json'), JSON.stringify(res) + '\n');
+    writeFileSync(join(dir, 'response.json'), '\uFEFF' + JSON.stringify(res) + '\n');
   }, 30);
   return () => clearInterval(timer);
 }
