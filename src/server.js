@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { readSong, summarizeSong } from './song.js';
 import { listSongs, resolveSong, songFolder } from './library.js';
 import { bridgeStatus, call } from './bridge.js';
+import { midiPort } from './midi.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -70,8 +71,12 @@ server.tool(
   {},
   guard(async () => {
     const s = bridgeStatus();
-    if (s.connected) s.ping = await call('ping');
-    return s;
+    if (!s.loaded) return { connected: false, ...s };
+    try {
+      return { connected: true, midiPort: midiPort(), ping: await call('ping', {}, { timeoutMs: 2500 }), ...s };
+    } catch (e) {
+      return { connected: false, error: e.message, ...s };
+    }
   }),
 );
 

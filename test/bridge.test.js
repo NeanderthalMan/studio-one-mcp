@@ -32,11 +32,13 @@ function fakeDevice(dir, handle) {
   return () => clearInterval(timer);
 }
 
-test('not connected without a heartbeat', () => {
+test('status: not loaded, loaded, closed', () => {
   const dir = mkdtempSync(join(tmpdir(), 's1mb-'));
-  assert.equal(bridgeStatus(dir).connected, false);
-  writeFileSync(join(dir, 'status.json'), JSON.stringify({ protocol: 1, heartbeat: Date.now() - 60000 }));
-  assert.match(bridgeStatus(dir).reason, /heartbeat/);
+  assert.equal(bridgeStatus(dir).loaded, false);
+  writeFileSync(join(dir, 'status.json'), '\uFEFF' + JSON.stringify({ protocol: 1, heartbeat: 1 }));
+  assert.equal(bridgeStatus(dir).loaded, true);
+  writeFileSync(join(dir, 'status.json'), JSON.stringify({ protocol: 1, closed: true }));
+  assert.match(bridgeStatus(dir).reason, /closed/);
 });
 
 test('round trip, sequential requests, and device errors', async () => {
@@ -46,11 +48,13 @@ test('round trip, sequential requests, and device errors', async () => {
     return { op, args };
   });
   try {
-    assert.equal(bridgeStatus(dir).connected, true);
-    const [a, b] = await Promise.all([call('ping', {}, { dir }), call('echo', { x: 1 }, { dir })]);
+    let nudges = 0;
+    const opts = { dir, nudge: () => nudges++ };
+    const [a, b] = await Promise.all([call('ping', {}, opts), call('echo', { x: 1 }, opts)]);
+    assert.ok(nudges >= 2, 'each request rings the doorbell');
     assert.deepEqual(a, { op: 'ping', args: {} });
     assert.deepEqual(b, { op: 'echo', args: { x: 1 } });
-    await assert.rejects(call('boom', {}, { dir }), /Studio One: nope/);
+    await assert.rejects(call('boom', {}, opts), /Studio One: nope/);
   } finally {
     stop();
   }

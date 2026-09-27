@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- No physical controls. bridgeTick is a virtual control the device script
-     flips as a clock for the component (see BridgeDevice.js). The mixer mapping
-     gives the script every console channel: label, volume, pan, mute, solo. -->
+<!-- bridgeTick is the bridge's doorbell: after writing request.json the client
+     sends CC 119 on the device's input port (e.g. the IAC bus), alternating
+     0/127 so every nudge is a value change, and the component answers in
+     paramChanged. The mixer mapping gives the script every console channel. -->
 <ControlSurface>
 	<Controls>
-		<Control name="bridgeTick" options="receive"/>
+		<Control name="bridgeTick" options="receive">
+			<MidiMessage status="#B0" address="#77"/>
+		</Control>
 	</Controls>
 	<Mappings>
 		<Value control="bridgeTick" param="bridgeTick"/>

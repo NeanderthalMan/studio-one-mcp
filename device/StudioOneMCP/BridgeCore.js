@@ -8,9 +8,9 @@
 //   response.json  written by us: {id, session, ok, result | error, ms}
 //
 // Runs in the component script, the only one of the two with a Host object.
-// Studio One 5 has no script timers (Host.Signals.postMessage is missing), so the
-// device script, which gets onIdle() but has no Host, toggles a hidden "bridgeTick"
-// control; the surface maps it to a component parameter, and each change calls tick().
+// Studio One 5 has no usable script timer, so the bridge is event-driven: after
+// writing request.json the client sends a MIDI CC that the surface maps to the
+// component's bridgeTick parameter, and each change calls tick().
 
 const kProtocol = 1;
 const kHeartbeatMs = 2000;
@@ -82,7 +82,6 @@ class Bridge {
         this.startedAt = Date.now();
         this.lastId = null;
         this.lastBeat = 0;
-        this.lastPoll = 0;
         this.clocks = {};       // tick counts per clock source, for diagnostics
         this.clockErrors = {};
         this.beat(true);
@@ -105,8 +104,6 @@ class Bridge {
     tick(source) {
         if (source) this.clocks[source] = (this.clocks[source] || 0) + 1;
         const now = Date.now();
-        if (now - this.lastPoll < (this.config.pollMs || 100)) return;
-        this.lastPoll = now;
         this.beat(false);
         const req = this.mailbox.read("request.json");
         if (!req || typeof req.id !== "string" || req.id === this.lastId) return;
