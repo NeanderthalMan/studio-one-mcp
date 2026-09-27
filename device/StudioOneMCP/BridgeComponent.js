@@ -16,23 +16,13 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         } catch (e) {
             Host.Console.writeLine("studio-one-mcp: bridge init failed: " + e);
         }
-        // Two candidate clocks; status.json reports which one actually fires.
-        //  1. a GUI idle task (ITimerTask.onTimer), registered here;
-        //  2. the device script flipping bridgeTick from its onIdle (BridgeDevice.js).
-        this.idleTask = null;
-        try {
-            const task = { interfaces: [Host.Interfaces.ITimerTask], onTimer: () => this.clockTick("idleTask") };
-            Host.GUI.addIdleTask(task);
-            this.idleTask = task;
-        } catch (e) {
-            if (this.bridge) this.bridge.clockErrors.idleTask = String(e);
-        }
+        // Clock: the device script flips bridgeTick from its onIdle (BridgeDevice.js).
+        // Do NOT use Host.GUI.addIdleTask with a script object here: on Studio One
+        // 5.5.2 that crashed the app at launch (EXC_BAD_ACCESS in cclgui's timer).
         if (this.bridge) this.bridge.beat(true); // publish clockErrors even if no clock fires
     }
 
     onExit() {
-        if (this.idleTask) { try { Host.GUI.removeIdleTask(this.idleTask); } catch (_) {} }
-        this.idleTask = null;
         if (this.bridge) this.bridge.close();
         this.bridge = null;
         super.onExit();
