@@ -73,7 +73,8 @@ server.tool(
     const s = bridgeStatus();
     if (!s.loaded) return { connected: false, ...s };
     try {
-      return { connected: true, midiPort: midiPort(), ping: await call('ping', {}, { timeoutMs: 2500 }), ...s };
+      const ping = await call('ping', {}, { timeoutMs: 2500 });
+      return { connected: true, midiPort: midiPort(), ping, ...s };
     } catch (e) {
       return { connected: false, error: e.message, ...s };
     }

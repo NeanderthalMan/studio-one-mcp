@@ -40,7 +40,7 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
     }
 
     channelElements() {
-        const bank = this.model.root.find("mixer").find("channels");
+        const bank = this.hostComponent.model.root.find("mixer").find("channels");
         const out = [];
         for (let i = 0; i < 256; i++) {
             const el = bank.getElement(i);
