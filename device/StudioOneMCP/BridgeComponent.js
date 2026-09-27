@@ -27,6 +27,7 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         } catch (e) {
             if (this.bridge) this.bridge.clockErrors.idleTask = String(e);
         }
+        if (this.bridge) this.bridge.beat(true); // publish clockErrors even if no clock fires
     }
 
     onExit() {
