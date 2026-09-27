@@ -58,7 +58,7 @@ To remove it: `node scripts/install-device.js --uninstall`, then remove the devi
 
 ## How the live bridge works
 
-Studio One runs control-surface scripts in an embedded SpiderMonkey engine. That engine can read and write files but cannot open sockets. So the bridge is a folder:
+Studio One runs control-surface scripts in an embedded SpiderMonkey engine. Scripts can read and write files but cannot open sockets, so the bridge is a folder. In Studio One 5 there is also no script timer, and only the *device* script gets a periodic `onIdle()` while only the *component* script can use `Host`. So the device flips a hidden `bridgeTick` control about every 100 ms, the surface maps it to a component parameter, and the component checks the mailbox on each change.
 
 ```
 status.json    device → client   heartbeat every 2 s, session id

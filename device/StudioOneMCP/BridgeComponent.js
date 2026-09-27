@@ -1,27 +1,39 @@
-// studio-one-mcp bridge component: gives the bridge (owned by BridgeDevice.js,
-// see BridgeCore.js) access to the mixer through this surface's channel bank.
+// studio-one-mcp bridge component: owns the mailbox bridge (BridgeCore.js) and
+// gives it the mixer through this surface's channel bank.
 
 include_file("resource://com.presonus.musicdevices/sdk/controlsurfacecomponent.js");
-
-// Same global the bridge core reads (bridgeGlobals in BridgeCore.js). Not shared
-// code on purpose: if device and component share one script context, including
-// BridgeCore.js twice would redeclare its classes.
-function componentRegistry() {
-    const g = (typeof globalThis === "object" && globalThis) || this;
-    if (!g.__studioOneMcp) g.__studioOneMcp = {};
-    return g.__studioOneMcp;
-}
+include_file("BridgeConfig.js");
+include_file("BridgeCore.js");
 
 class BridgeComponent extends PreSonus.ControlSurfaceComponent {
     onInit(hostComponent) {
         super.onInit(hostComponent);
-        componentRegistry().component = this;
+        this.tickParam = hostComponent.paramList.addParam("bridgeTick");
+        this.bridge = null;
+        try {
+            const cfg = bridgeConfig();
+            if (cfg) this.bridge = new Bridge(cfg, this);
+        } catch (e) {
+            Host.Console.writeLine("studio-one-mcp: bridge init failed: " + e);
+        }
     }
 
     onExit() {
-        const g = componentRegistry();
-        if (g.component === this) g.component = null;
+        if (this.bridge) this.bridge.close();
+        this.bridge = null;
         super.onExit();
+    }
+
+    // The device script flips bridgeTick every ~100 ms (see BridgeDevice.js).
+    paramChanged(param) {
+        if (param === this.tickParam) {
+            if (this.bridge) {
+                try { this.bridge.tick(); }
+                catch (e) { Host.Console.writeLine("studio-one-mcp: tick failed: " + e); }
+            }
+            return;
+        }
+        super.paramChanged(param);
     }
 
     channelElements() {

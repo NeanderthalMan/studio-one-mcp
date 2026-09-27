@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- No physical controls. The mixer mapping gives the script a bank of every
-     console channel so it can read and set labels, volume, pan, mute and solo. -->
+<!-- No physical controls. bridgeTick is a virtual control the device script
+     flips as a clock for the component (see BridgeDevice.js). The mixer mapping
+     gives the script every console channel: label, volume, pan, mute, solo. -->
 <ControlSurface>
-	<Controls/>
+	<Controls>
+		<Control name="bridgeTick" options="receive"/>
+	</Controls>
 	<Mappings>
+		<Value control="bridgeTick" param="bridgeTick"/>
 		<DeviceMapping device="MixerConsole" name="mixer">
 			<ScrollBank target="AllBank" pagesize="256" name="channels">
 				<foreach variable="$ch" count="256">

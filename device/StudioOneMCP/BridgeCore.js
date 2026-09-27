@@ -7,9 +7,10 @@
 //   request.json   written by the client (atomically): {id, op, args}
 //   response.json  written by us: {id, session, ok, result | error, ms}
 //
+// Runs in the component script, the only one of the two with a Host object.
 // Studio One 5 has no script timers (Host.Signals.postMessage is missing), so the
-// device's onIdle(time) callback drives Bridge.tick(). Mixer operations need the
-// control-surface component, which registers itself in a global when it starts.
+// device script, which gets onIdle() but has no Host, toggles a hidden "bridgeTick"
+// control; the surface maps it to a component parameter, and each change calls tick().
 
 const kProtocol = 1;
 const kHeartbeatMs = 2000;
@@ -19,12 +20,6 @@ function newSession() {
     for (let i = 0; i < 4; i++)
         s += ("00000000" + Math.floor(Math.random() * 4294967296).toString(16)).slice(-8);
     return s;
-}
-
-function bridgeGlobals() {
-    const g = (typeof globalThis === "object" && globalThis) || this;
-    if (!g.__studioOneMcp) g.__studioOneMcp = {};
-    return g.__studioOneMcp;
 }
 
 // JSON-safe view of anything, including host objects that JSON.stringify chokes on.
@@ -79,8 +74,9 @@ class Mailbox {
 }
 
 class Bridge {
-    constructor(config) {
+    constructor(config, component) {
         this.config = config;
+        this.component = component;
         this.mailbox = new Mailbox(config.mailbox);
         this.session = newSession();
         this.startedAt = Date.now();
@@ -89,8 +85,6 @@ class Bridge {
         this.lastPoll = 0;
         this.beat(true);
     }
-
-    get component() { return bridgeGlobals().component || null; }
 
     close() {
         try { this.mailbox.write("status.json", { protocol: kProtocol, session: this.session, closed: true, heartbeat: Date.now() }); } catch (_) {}
@@ -102,7 +96,7 @@ class Bridge {
         this.lastBeat = now;
         this.mailbox.write("status.json", {
             protocol: kProtocol, session: this.session, startedAt: this.startedAt, heartbeat: now,
-            allowEval: !!this.config.allowEval, component: !!this.component,
+            allowEval: !!this.config.allowEval,
         });
     }
 
@@ -128,20 +122,14 @@ class Bridge {
 
     handle(op, args) {
         switch (op) {
-            case "ping": return { pong: true, session: this.session, time: Date.now(), component: !!this.component };
-            case "channels": return this.mixer().channels();
-            case "setChannel": return this.mixer().setChannel(args);
+            case "ping": return { pong: true, session: this.session, time: Date.now() };
+            case "channels": return this.component.channels();
+            case "setChannel": return this.component.setChannel(args);
             case "command": return this.command(args);
             case "listCommands": return this.listCommands(args);
             case "eval": return this.evaluate(args);
             default: throw new Error("unknown op: " + op);
         }
-    }
-
-    mixer() {
-        const c = this.component;
-        if (!c) throw new Error("the bridge's control-surface component is not reachable from the device script");
-        return c;
     }
 
     command(args) {
