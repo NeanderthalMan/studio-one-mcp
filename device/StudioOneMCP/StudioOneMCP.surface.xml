@@ -12,7 +12,10 @@
 		</Control>
 	</Controls>
 	<Mappings>
-		<Toggle control="bridgeTick" param="bridgeTick"/>
+		<!-- Component-param mappings only take effect inside <Global> (cf. CC121). -->
+		<Global>
+			<Toggle control="bridgeTick" param="bridgeTick"/>
+		</Global>
 		<DeviceMapping device="MixerConsole" name="mixer">
 			<ScrollBank target="AllBank" pagesize="256" name="channels">
 				<foreach variable="$ch" count="256">
