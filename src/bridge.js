@@ -17,7 +17,7 @@ const readJson = (p) => {
 
 export function bridgeStatus(dir = mailboxDir) {
   const s = readJson(join(dir, 'status.json'));
-  if (!s) return { connected: false, reason: 'No status.json yet — is the MCP Bridge device added in Studio One (Options → External Devices)?' };
+  if (!s) return { connected: false, reason: 'No status.json yet — is the MCP Bridge device added in Studio One (Studio One → Preferences / Options → External Devices)?' };
   if (s.closed) return { connected: false, reason: 'Studio One closed the bridge (song/app closed).', ...s };
   const age = Date.now() - s.heartbeat;
   if (age > STALE_MS) return { connected: false, reason: `Last heartbeat ${Math.round(age / 1000)}s ago — Studio One is not running or the device is disabled.`, ...s };

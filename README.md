@@ -44,7 +44,7 @@ Register the server with your MCP client. For Claude Code, the repo's `.mcp.json
 npm run install-device            # add -- --allow-eval to enable live_eval
 ```
 
-Then restart Studio One and add the device once: **Studio One → Options → External Devices → Add… → studio-one-mcp → MCP Bridge**. It needs no MIDI ports. `live_status` should now report `connected: true`.
+Then restart Studio One and add the device once: **Studio One → Preferences… (⌘,) → External Devices → Add… → studio-one-mcp → MCP Bridge** (on Windows it is Studio One → Options). It needs no MIDI ports. `live_status` should now report `connected: true`.
 
 To remove it: `node scripts/install-device.js --uninstall`, then remove the device in External Devices.
 
