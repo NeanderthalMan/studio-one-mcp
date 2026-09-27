@@ -1,0 +1,31 @@
+{
+  "name": "studio-one-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for PreSonus Studio One: read songs from .song files, and talk to a running Studio One through an in-app bridge device.",
+  "type": "module",
+  "bin": {
+    "studio-one-mcp": "src/server.js"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "install-device": "node scripts/install-device.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "mcp",
+    "studio-one",
+    "presonus",
+    "daw",
+    "model-context-protocol"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "fast-xml-parser": "^5.11.1",
+    "fflate": "^0.8.3",
+    "zod": "^4.6.5"
+  }
+}

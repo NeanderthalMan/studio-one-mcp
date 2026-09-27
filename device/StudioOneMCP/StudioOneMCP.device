@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- studio-one-mcp bridge: a portless control surface whose only job is to answer
+     requests dropped in a local mailbox folder. See README.md. -->
+<DeviceDefinition
+	vendor="studio-one-mcp"
+	name="MCP Bridge"
+	classID="{3CF4A272-66FD-48F1-9BBD-D223E971506A}"
+	category="Surface"
+	nativeCode="JSControlSurfaceDevice"
+	deviceScriptFile="BridgeDevice.js"
+	deviceScriptFile.functionName="createBridgeDevice"
+	surfaceFile="StudioOneMCP.surface.xml"
+	componentScriptFile="BridgeComponent.js"
+	componentScriptFile.functionName="createBridgeComponent"
+/>

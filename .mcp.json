@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "studio-one": { "command": "node", "args": ["src/server.js"] }
+  }
+}

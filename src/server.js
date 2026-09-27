@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+// studio-one-mcp: MCP server for PreSonus Studio One.
+//
+// Two kinds of tools:
+//  - song_*  read .song files from disk. Always available; reflect the last save.
+//  - live_*  talk to a running Studio One through the MCP Bridge device.
+import { readdirSync, statSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+import { readSong, summarizeSong } from './song.js';
+import { listSongs, resolveSong, songFolder } from './library.js';
+import { bridgeStatus, call } from './bridge.js';
+
+const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
+const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
+const guard = (fn) => async (args) => {
+  try {
+    return json(await fn(args));
+  } catch (e) {
+    return fail(String(e.message || e));
+  }
+};
+
+// ---- server ---------------------------------------------------------------------
+
+const server = new McpServer({ name: 'studio-one-mcp', version: '0.1.0' });
+
+server.tool(
+  'song_list',
+  'List Studio One songs on disk (newest first), from ~/Documents/Studio One/Songs or $STUDIO_ONE_SONGS.',
+  { query: z.string().optional().describe('Case-insensitive substring of the song title'), limit: z.number().int().optional() },
+  guard((a) => listSongs(a)),
+);
+
+server.tool(
+  'song_read',
+  'Read a Studio One song from its .song file: tempo, time signature, markers, arranger sections, tracks with takes/clips (bar, beat and seconds), mixer channels with volume/pan/mute/solo and plug-in inserts, and media files. Reflects the last save, not unsaved edits.',
+  {
+    song: z.string().describe('Song title (or unique part of it) or absolute path to a .song file'),
+    detail: z.enum(['summary', 'full']).optional().describe('summary (default): one line per track. full: every take and clip.'),
+    track: z.string().optional().describe('With detail=full, only include tracks whose name contains this'),
+  },
+  guard(({ song, detail = 'summary', track }) => {
+    const s = readSong(resolveSong(song));
+    if (detail === 'summary') return summarizeSong(s);
+    if (track) s.tracks = s.tracks.filter((t) => t.name.toLowerCase().includes(track.toLowerCase()));
+    return s;
+  }),
+);
+
+server.tool(
+  'song_history',
+  "List a song's autosaves and backups in its History folder (newest first). Each path can be passed to song_read to compare versions.",
+  { song: z.string().describe('Song title or .song path') },
+  guard(({ song }) => {
+    const history = join(songFolder(resolveSong(song)), 'History');
+    if (!existsSync(history)) return [];
+    return readdirSync(history)
+      .filter((f) => f.endsWith('.song'))
+      .map((f) => ({ file: join(history, f), modified: statSync(join(history, f)).mtime.toISOString() }))
+      .sort((a, b) => b.modified.localeCompare(a.modified));
+  }),
+);
+
+server.tool(
+  'live_status',
+  'Is a running Studio One reachable through the MCP Bridge device? Explains how to fix it if not.',
+  {},
+  guard(async () => {
+    const s = bridgeStatus();
+    if (s.connected) s.ping = await call('ping');
+    return s;
+  }),
+);
+
+server.tool(
+  'live_channels',
+  'List the mixer channels of the song open in Studio One right now, with live volume, pan, mute, solo and record-arm.',
+  {},
+  guard(() => call('channels')),
+);
+
+server.tool(
+  'live_set_channel',
+  'Change one mixer channel in the running Studio One. Values are Studio One normalised values (volume/pan 0..1, pan 0.5 = centre; mute/solo/recordArmed 0 or 1). Returns before/after.',
+  {
+    channel: z.string().describe('Exact channel label as shown in the console'),
+    field: z.enum(['volume', 'pan', 'mute', 'solo', 'recordArmed']),
+    value: z.number(),
+  },
+  guard((a) => call('setChannel', a)),
+);
+
+server.tool(
+  'live_command',
+  'Run any Studio One command by category and name, exactly as listed in Studio One → Keyboard Shortcuts (e.g. Transport/Start, Transport/Stop, Transport/Record, Edit/Undo, Song/Save, View/Mixer). Use live_list_commands to discover names.',
+  {
+    category: z.string(),
+    name: z.string(),
+    args: z.array(z.any()).optional().describe('Optional flat [key, value, key, value…] command arguments'),
+  },
+  guard((a) => call('command', a)),
+);
+
+server.tool(
+  'live_list_commands',
+  'List Studio One commands available to live_command, optionally filtered by a substring.',
+  { filter: z.string().optional() },
+  guard((a) => call('listCommands', a, { timeoutMs: 15000 })),
+);
+
+server.tool(
+  'live_eval',
+  "Run JavaScript inside Studio One's script engine and return the result (host objects are described to a depth). Globals: Host, PreSonus, component, describe. Only works when the bridge was installed with --allow-eval. Useful for exploring the undocumented object model, e.g. Host.Objects.getObjectByUrl('://studioapp/DocumentManager').",
+  { code: z.string().describe('Function body; use `return` to send a value back'), depth: z.number().int().optional() },
+  guard((a) => call('eval', a, { timeoutMs: 15000 })),
+);
+
+await server.connect(new StdioServerTransport());

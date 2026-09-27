@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No physical controls. The mixer mapping gives the script a bank of every
+     console channel so it can read and set labels, volume, pan, mute and solo. -->
+<ControlSurface>
+	<Controls/>
+	<Mappings>
+		<DeviceMapping device="MixerConsole" name="mixer">
+			<ScrollBank target="AllBank" pagesize="256" name="channels">
+				<foreach variable="$ch" count="256">
+					<Strip/>
+				</foreach>
+			</ScrollBank>
+		</DeviceMapping>
+	</Mappings>
+</ControlSurface>
