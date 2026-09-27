@@ -83,6 +83,8 @@ class Bridge {
         this.lastId = null;
         this.lastBeat = 0;
         this.lastPoll = 0;
+        this.clocks = {};       // tick counts per clock source, for diagnostics
+        this.clockErrors = {};
         this.beat(true);
     }
 
@@ -96,11 +98,12 @@ class Bridge {
         this.lastBeat = now;
         this.mailbox.write("status.json", {
             protocol: kProtocol, session: this.session, startedAt: this.startedAt, heartbeat: now,
-            allowEval: !!this.config.allowEval,
+            allowEval: !!this.config.allowEval, clocks: this.clocks, clockErrors: this.clockErrors,
         });
     }
 
-    tick() {
+    tick(source) {
+        if (source) this.clocks[source] = (this.clocks[source] || 0) + 1;
         const now = Date.now();
         if (now - this.lastPoll < (this.config.pollMs || 100)) return;
         this.lastPoll = now;

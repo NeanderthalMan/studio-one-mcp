@@ -16,23 +16,35 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         } catch (e) {
             Host.Console.writeLine("studio-one-mcp: bridge init failed: " + e);
         }
+        // Two candidate clocks; status.json reports which one actually fires.
+        //  1. a GUI idle task (ITimerTask.onTimer), registered here;
+        //  2. the device script flipping bridgeTick from its onIdle (BridgeDevice.js).
+        this.idleTask = null;
+        try {
+            const task = { interfaces: [Host.Interfaces.ITimerTask], onTimer: () => this.clockTick("idleTask") };
+            Host.GUI.addIdleTask(task);
+            this.idleTask = task;
+        } catch (e) {
+            if (this.bridge) this.bridge.clockErrors.idleTask = String(e);
+        }
     }
 
     onExit() {
+        if (this.idleTask) { try { Host.GUI.removeIdleTask(this.idleTask); } catch (_) {} }
+        this.idleTask = null;
         if (this.bridge) this.bridge.close();
         this.bridge = null;
         super.onExit();
     }
 
-    // The device script flips bridgeTick every ~100 ms (see BridgeDevice.js).
+    clockTick(source) {
+        if (!this.bridge) return;
+        try { this.bridge.tick(source); }
+        catch (e) { Host.Console.writeLine("studio-one-mcp: tick failed: " + e); }
+    }
+
     paramChanged(param) {
-        if (param === this.tickParam) {
-            if (this.bridge) {
-                try { this.bridge.tick(); }
-                catch (e) { Host.Console.writeLine("studio-one-mcp: tick failed: " + e); }
-            }
-            return;
-        }
+        if (param === this.tickParam) return this.clockTick("deviceTick");
         super.paramChanged(param);
     }
 
