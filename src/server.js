@@ -19,6 +19,7 @@ import { arranger, listMacros, runMacro } from './arranger.js';
 import { tempo } from './tempo.js';
 import { trackEdit } from './tracks.js';
 import { recordSetup } from './record.js';
+import { snapshot } from './snapshots.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -448,6 +449,22 @@ server.tool(
     bpm: z.number().optional(),
   },
   guard((a) => tempo(call, a)),
+);
+
+server.tool(
+  'live_plugin_snapshot',
+  "Save a plug-in's current settings under a name, restore them onto the same kind of plug-in (any channel), or list saved snapshots. A stand-in for presets that works remotely: it stores every known parameter's raw value (PreSonus plug-ins; names as in live_plugin_params) in the studio-one-mcp data folder. Restore only sets parameters that differ.",
+  {
+    action: z.enum(['save', 'restore', 'list']),
+    channel: z.string().optional(),
+    slot: z.number().int().optional(),
+    name: z.string().optional(),
+    plugin: z.string().optional().describe('For list: only this plug-in'),
+  },
+  guard((a) => {
+    if (a.action !== 'list' && (a.channel === undefined || a.slot === undefined)) throw new Error(`${a.action} needs channel and slot`);
+    return snapshot(call, a);
+  }),
 );
 
 server.tool(

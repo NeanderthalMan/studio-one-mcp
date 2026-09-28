@@ -15,6 +15,10 @@ import { tempo } from '../../src/tempo.js';
 import { trackEdit } from '../../src/tracks.js';
 import { readSong } from '../../src/song.js';
 import { fileURLToPath } from 'node:url';
+import { mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { snapshot } from '../../src/snapshots.js';
 
 let channels;
 let testChannel;
@@ -464,6 +468,25 @@ test('track edit: rename, colour and remove a scratch track; selection kept', as
   assert.equal(song1.trackCount, song0.trackCount);
   for (const [i, n] of song0.selectedTracks.entries()) await call('selectTrack', { name: n, exclusive: i === 0 });
   assert.deepEqual((await call('song')).selectedTracks, song0.selectedTracks);
+});
+
+test('plug-in snapshot: save, change a parameter, restore brings it back', async (t) => {
+  const rack = (await call('inserts', {})).find((c) => c.inserts.some((i) => pluginParamNames(i.name).names.length));
+  if (!rack) return t.skip('no channel has a PreSonus plug-in');
+  const slot = rack.inserts.find((i) => pluginParamNames(i.name).names.length).slot;
+  const dir = mkdtempSync(join(tmpdir(), 's1snap-live-'));
+  const at = { channel: rack.channel, slot };
+  await snapshot(call, { action: 'save', ...at, name: 'live test' }, { dir });
+  const all = (await call('pluginParams', { ...at, names: pluginParamNames(rack.inserts.find((i) => i.slot === slot).name).names })).params;
+  const p = all.find((x) => typeof x.normalized === 'number' && x.max - x.min > 1);
+  try {
+    await call('setPluginParam', { ...at, param: p.name, normalized: p.normalized > 0.5 ? 0.25 : 0.75 });
+  } finally {
+    const r = await snapshot(call, { action: 'restore', ...at, name: 'live test' }, { dir });
+    assert.ok(r.changedParams.includes(p.name), `${p.name} restored`);
+  }
+  const back = (await call('pluginParams', { ...at, names: [p.name] })).params[0];
+  assert.equal(back.value, p.value);
 });
 
 // Record modes are not exercised: they cannot be read, so they could not be restored.
