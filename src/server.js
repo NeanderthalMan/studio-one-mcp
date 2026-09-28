@@ -20,6 +20,7 @@ import { tempo } from './tempo.js';
 import { trackEdit } from './tracks.js';
 import { recordSetup } from './record.js';
 import { snapshot } from './snapshots.js';
+import { bounce } from './bounce.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -449,6 +450,13 @@ server.tool(
     bpm: z.number().optional(),
   },
   guard((a) => tempo(call, a)),
+);
+
+server.tool(
+  'live_bounce',
+  "Bounce all events on one track in the running Studio One: inPlace renders them into a single new event (with plug-ins), toNewTrack renders them onto a new track of the same name and mutes the originals. No dialogs; one live_undo reverts it, but the rendered .wav stays in the song's Bounces folder. Exporting a mixdown or stems is not offered: those open dialogs.",
+  { track: z.string(), mode: z.enum(['inPlace', 'toNewTrack']).optional() },
+  guard((a) => bounce(call, a)),
 );
 
 server.tool(
