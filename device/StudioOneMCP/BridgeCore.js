@@ -139,6 +139,8 @@ class Bridge {
             case "song": return this.song();
             case "tracks": return this.tracks(args);
             case "selectTrack": return this.selectTrack(args);
+            case "notes": return this.notes(args);
+            case "metronome": return this.metronome(args);
             case "transport": return this.transport(args);
             case "setTransport": return this.setTransport(args);
             case "markers": return this.markers();
@@ -158,6 +160,8 @@ class Bridge {
             case "setInsertBypass": return this.fromComponent(c => c.setInsertBypass(args));
             case "sends": return this.fromComponent(c => c.sends(args));
             case "setSend": return this.fromComponent(c => c.setSend(args));
+            case "setChannelLabel": return this.fromComponent(c => c.setChannelLabel(args));
+            case "setChannelColor": return this.fromComponent(c => c.setChannelColor(args));
             case "setAutomation": return this.fromComponent(c => c.setAutomation(args));
             case "pluginParams": return this.fromComponent(c => c.pluginParams(args));
             case "setPluginParam": return this.fromComponent(c => c.setPluginParam(args));
@@ -270,6 +274,70 @@ class Bridge {
             out.push(entry);
         }
         return out;
+    }
+
+    // Metronome settings: the document's Environment/Metronome parameters
+    // (clickOn, precount, preroll, bars = precount length 1..16), read and set.
+    metronome(args) {
+        const m = docObject("Environment/Metronome");
+        if (!m || !has(m, "findParameter", "function")) return fail("metronome not available (no song open?)");
+        const fields = { click: "clickOn", precount: "precount", preroll: "preroll", precountBars: "bars" };
+        for (const key in fields) {
+            if (args[key] === undefined) continue;
+            const p = m.findParameter(fields[key]);
+            if (!p || !has(p, "setValue", "function")) return fail(key + " not available");
+            const v = typeof args[key] === "boolean" ? (args[key] ? 1 : 0) : args[key];
+            if (typeof v !== "number" || v < p.min || v > p.max) return fail(key + " must be from " + p.min + " to " + p.max);
+            p.setValue(v, true);
+        }
+        const out = {};
+        for (const key in fields) {
+            const p = m.findParameter(fields[key]);
+            out[key] = p ? (key === "precountBars" ? p.value : !!p.value) : null;
+        }
+        return out;
+    }
+
+    // Notes of an instrument track's parts. A part's createSequenceIterator()
+    // walks its notes with done()/next() (its createIterator() gives nothing):
+    // pitch, velocity 0..1, startTime/endTime in song seconds, startTime.musical
+    // in quarter-note beats. Read-only: editing notes needs an edit task.
+    notes(args) {
+        const list = trackList();
+        if (!list) return fail("no song open");
+        const matches = uniqueTracks(list).filter(t => String(t.name) === String(args.track));
+        if (matches.length !== 1) return fail(matches.length ? "track name is ambiguous: " + args.track : "no track named " + args.track);
+        const t = matches[0];
+        const max = args.maxNotes === undefined ? 500 : args.maxNotes;
+        const parts = [];
+        let total = 0;
+        let skipped = 0;
+        const it = has(t, "createIterator", "function") ? t.createIterator() : null;
+        let ev;
+        while (it && (ev = it.next())) {
+            if (!has(ev, "createSequenceIterator", "function")) continue;
+            const part = { name: has(ev, "name", "string") ? ev.name : "", start: seconds(ev.startTime), end: seconds(ev.endTime), muted: !!ev.isMuted, notes: [], noteCount: 0 };
+            const ni = ev.createSequenceIterator();
+            while (ni && has(ni, "done", "function") && !ni.done()) {
+                const n = ni.next();
+                if (!n) break;
+                part.noteCount++;
+                if (total >= max) { skipped++; continue; }
+                total++;
+                const start = seconds(n.startTime), end = seconds(n.endTime);
+                part.notes.push({
+                    pitch: has(n, "pitch", "number") ? n.pitch : null,
+                    velocity: has(n, "velocity", "number") ? Math.round(n.velocity * 127) : null,
+                    start: start, end: end,
+                    length: start !== null && end !== null ? Math.round((end - start) * 1000) / 1000 : null,
+                    beat: n.startTime && has(n.startTime, "musical", "number") ? Math.round(n.startTime.musical * 1000) / 1000 : null,
+                    muted: !!n.isMuted,
+                });
+            }
+            parts.push(part);
+        }
+        const mediaType = has(t, "mediaType", "string") ? t.mediaType : null;
+        return { track: String(t.name), mediaType: mediaType, parts: parts, truncated: skipped > 0 };
     }
 
     selectTrack(args) {

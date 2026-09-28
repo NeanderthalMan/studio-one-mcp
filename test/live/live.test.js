@@ -6,25 +6,42 @@
 // They touch the open song only reversibly: one channel's mute/solo/volume are
 // changed and restored, and View/Console is toggled twice. Pick the channel with
 // S1_TEST_CHANNEL (default: the first channel that is neither muted nor soloed).
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { bridgeStatus, call } from '../../src/bridge.js';
 import { pluginParamNames } from '../../src/plugins.js';
 import { arranger, listMacros, runMacro } from '../../src/arranger.js';
 import { tempo } from '../../src/tempo.js';
+import { trackEdit } from '../../src/tracks.js';
+import { readSong } from '../../src/song.js';
+import { fileURLToPath } from 'node:url';
+import { mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { snapshot } from '../../src/snapshots.js';
 
 let channels;
 let testChannel;
+let selection0;
 
 before(async () => {
   const s = bridgeStatus();
   assert.ok(s.loaded, `bridge not loaded: ${s.reason}`);
   await call('ping', {}, { timeoutMs: 3000 });
+  selection0 = (await call('song')).selectedTracks;
   channels = await call('channels');
   testChannel = process.env.S1_TEST_CHANNEL
     ? channels.find((c) => c.label === process.env.S1_TEST_CHANNEL)
     : channels.find((c) => !c.mute && !c.solo);
   assert.ok(testChannel, 'a channel to test with');
+});
+
+// The track selection is part of what a run must leave as it found it (an undo
+// can re-select the track its edit was on). Put it back, then say if it moved.
+after(async () => {
+  const now = (await call('song')).selectedTracks;
+  for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  assert.deepEqual(now, selection0, 'a test left the track selection changed (restored now)');
 });
 
 test('ping round trip is fast and carries the live session', async () => {
@@ -275,24 +292,30 @@ test('editEvents split, then undo restores the events', async (t) => {
   const track = await uniqueNamed((x) => x.events.some((e) => e.end - e.start > 2));
   if (!track) return t.skip('no track with an event longer than 2 s');
   const ev = track.events.find((e) => e.end - e.start > 2);
+  const sel0 = (await call('song')).selectedTracks;
   const r = await call('editEvents', { track: track.name, action: 'split', at: ev.start + 1 });
   try {
     assert.equal(r.events.length, track.events.length + 1, 'one more event after the split');
   } finally {
     await call('undo', {});
+    // The undo re-selects the split track; put the selection back.
+    for (const [i, name] of sel0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
   assert.equal((await call('tracks', { name: track.name })).find((x) => x.name === track.name).eventCount, track.eventCount);
 });
 
-test('addTrack, then undo removes it', async () => {
-  const n0 = (await call('song')).trackCount;
+test('addTrack, then undo removes it; selection restored', async () => {
+  const song0 = await call('song');
+  const n0 = song0.trackCount;
   const r = await call('addTrack', { type: 'audioMono' });
   try {
     assert.equal(r.trackCount, n0 + 1);
   } finally {
     await call('undo', {});
+    for (const [i, name] of song0.selectedTracks.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
   assert.equal((await call('song')).trackCount, n0);
+  assert.deepEqual((await call('song')).selectedTracks, song0.selectedTracks);
 });
 
 test('meters: a dB reading for every channel', async () => {
@@ -374,74 +397,117 @@ test('macros: listed by decoded title; one checked, not run', async (t) => {
   assert.equal(typeof r.enabled, 'boolean');
 });
 
-// Seen on 5.5.2: Create Sections from Markers is one undo step and also shows the
-// arranger track; play, stop, jumps and the sync mode are not undo steps. The sync
-// mode cannot be read, so this test leaves it at Off (a fresh start had it at a
-// setting where the jump never came within 6 s). "Create Markers from Sections" is
-// enabled exactly while the arranger track is shown, not while sections exist.
-test('arranger: sections from markers, jump while playing, all restored', async () => {
-  const song0 = await call('song');
+// No sections are created and the sync mode is not touched here: on 5.5.2 a sync
+// mode change is an undo step only when it changes something, so a fixed undo count
+// after it once undid the sync change and left test sections in the song. goto is
+// tested against the saved sections by locating the stopped playhead (no edits).
+// createFromMarkers and jumps during playback were checked by hand.
+test("arranger: goto a saved section while stopped moves the playhead there", async (t) => {
+  const song0 = await call("song");
   const t0 = song0.transport;
-  assert.equal(t0.playing, false, 'start the live suite with Studio One stopped');
-  const markers0 = (await call('markers')).markers.map((m) => m.seconds);
-  for (const s of [4, 8]) assert.ok(!markers0.includes(s), `no marker at ${s}s already`);
-  const arrangerShown = async () => (await call('command', { category: 'Arranger', name: 'Create Markers from Sections', checkOnly: true })).enabled;
-  const shown0 = await arrangerShown();
-  await assert.rejects(arranger(call, () => [], { action: 'next' }), /while playing/);
-  await call('addMarker', { seconds: 4 });
-  await call('addMarker', { seconds: 8 });
-  let created = false;
+  assert.equal(t0.playing, false, "start the live suite with Studio One stopped");
+  const saved = song0.fileUrl ? readSong(fileURLToPath(song0.fileUrl)).sections : [];
+  await assert.rejects(arranger(call, () => saved, { action: "next" }), /while playing/);
+  if (saved.length < 2) return t.skip("the saved song has fewer than two arranger sections");
+  const list = (await arranger(call, () => saved, { action: "sections" })).sections;
+  const target = list[1];
   try {
-    created = (await arranger(call, () => [], { action: 'createFromMarkers' })).executed;
-    assert.equal(created, true);
-    assert.equal((await arranger(call, () => [], { action: 'syncMode', sync: 'off' })).executed, true);
-    await call('setTransport', { positionSeconds: 0 });
-    await call('transport', { action: 'play' });
-    await arranger(call, () => [], { action: 'goto', section: 3 });
-    let pos = 0;
-    for (let i = 0; i < 30 && !(pos >= 8 && pos < 12); i++) {
-      await new Promise((r) => setTimeout(r, 100));
-      pos = (await call('song')).transport.position.seconds;
-    }
-    assert.ok(pos >= 8 && pos < 12, `playing inside section 3 (8 s..), at ${pos}`);
-    const loop = (await call('song')).transport.loopRange;
-    assert.deepEqual([loop.start.seconds, loop.end.seconds], [t0.loopRange.start.seconds, t0.loopRange.end.seconds], 'loop range kept');
+    const r = await arranger(call, () => saved, { action: "goto", section: target.number });
+    assert.equal(r.located, target.number);
+    assert.ok(Math.abs(r.transport.position.seconds - target.start.seconds) < 0.01, `at ${r.transport.position.seconds}, section starts ${target.start.seconds}`);
   } finally {
-    await call('transport', { action: 'stop' });
-    if (created) await call('undo', {});
-    for (const s of [8, 4]) await call('deleteMarker', { seconds: s }).catch(() => {});
-    await call('setLoop', { start: t0.loopRange.start.seconds, end: t0.loopRange.end.seconds, enable: t0.loop });
-    await call('setTransport', { positionSeconds: t0.position.seconds });
-    for (const [i, name] of song0.selectedTracks.entries()) await call('selectTrack', { name, exclusive: i === 0 });
-    if ((await arrangerShown()) !== shown0) await call('command', { category: 'View', name: 'Open Arranger Track' });
+    await call("setTransport", { positionSeconds: t0.position.seconds });
   }
-  assert.deepEqual((await call('markers')).markers.map((m) => m.seconds), markers0);
-  assert.equal(await arrangerShown(), shown0, 'arranger track shown/hidden as before');
 });
 
-// Insert + set are two undo steps. "Tempo/Delete" is not used: it did not delete
-// the point at the playhead. A single-segment map is checked by changing the tempo
-// late in the song and seeing it at 2 s too (then undoing that).
-test('tempo: insert a change at 4 s, read it, two undos remove it', async () => {
-  const t0 = (await call('song')).transport;
-  const at = async (s) => (await tempo(call, { action: 'at', at: [s] })).tempo[0].bpm;
+// Reads and sets only: a set is reverted exactly by setting the old tempo back.
+// Insert is not run here: removing a tempo point needs undo, and in a full run
+// Studio One refused the first Edit/Undo right after it (done 0) and the second
+// undid an earlier edit instead, so an undo count cannot be trusted to clean up.
+// ("Tempo/Delete" is no help either: it did not delete the point at the playhead.)
+test("tempo: read at positions, set the segment and set it back", async () => {
+  const t0 = (await call("song")).transport;
+  const at = async (s) => (await tempo(call, { action: "at", at: [s] })).tempo[0].bpm;
   const base = await at(2);
-  assert.equal(await at(6), base, 'no tempo change between 2 s and 6 s to begin with');
-  const bpm = base === 90 ? 100 : 90;
-  const r = await tempo(call, { action: 'insert', at: 4, bpm });
+  const r = await tempo(call, { action: "at", at: [2, "3.1.1.0"] });
+  assert.deepEqual(r.tempo.map((x) => typeof x.bpm), ["number", "number"]);
   try {
-    assert.equal(r.inserted.bpm, bpm);
-    assert.deepEqual([await at(2), await at(6)], [base, bpm]);
+    const set = await tempo(call, { action: "set", at: 2, bpm: base + 1 });
+    assert.deepEqual([set.before.bpm, set.after.bpm], [base, base + 1]);
   } finally {
-    await call('undo', { steps: 2 });
+    assert.equal((await tempo(call, { action: "set", at: 2, bpm: base })).after.bpm, base);
   }
-  assert.deepEqual([await at(2), await at(6)], [base, base]);
-  await tempo(call, { action: 'set', at: 6, bpm: base + 1 });
-  const reach = await at(2);
-  await call('undo', {});
-  assert.equal(reach, base + 1, 'the point at 4 s is gone: one segment again');
-  assert.equal(await at(2), base);
-  assert.equal((await call('song')).transport.position.seconds, t0.position.seconds);
+  assert.equal((await call("song")).transport.position.seconds, t0.position.seconds);
+});
+
+test('notes: an instrument part reads back with pitches, velocities and times inside the part', async (t) => {
+  const music = (await call('tracks')).find((x) => x.mediaType === 'Music' && x.eventCount > 0);
+  if (!music) return t.skip('no instrument track with a part');
+  const r = await call('notes', { track: music.name });
+  const part = r.parts.find((p) => p.noteCount > 0);
+  if (!part) return t.skip(`${music.name} has no notes`);
+  assert.equal(part.notes.length, Math.min(part.noteCount, 500));
+  for (const n of part.notes) {
+    assert.ok(Number.isInteger(n.pitch) && n.pitch >= 0 && n.pitch <= 127, `pitch ${n.pitch}`);
+    assert.ok(n.velocity >= 0 && n.velocity <= 127, `velocity ${n.velocity}`);
+    assert.ok(n.start >= part.start - 0.001 && n.end <= part.end + 0.001 && n.end >= n.start, `${n.start}-${n.end} in ${part.start}-${part.end}`);
+    assert.equal(typeof n.beat, 'number');
+  }
+});
+
+// A scratch track is added, renamed, recoloured and removed: the song ends as it began
+// (two undo steps: add, remove). Rename and colour are not undo steps.
+test('track edit: rename, colour and remove a scratch track; selection kept', async () => {
+  const song0 = await call('song');
+  const added = await call('addTrack', { type: 'audioMono' });
+  const scratch = added.added[0];
+  let name = scratch;
+  try {
+    const r = await trackEdit(call, { track: scratch, action: 'rename', name: 'MCP Scratch Track' });
+    name = r.renamed.after;
+    assert.equal(name, 'MCP Scratch Track');
+    const c = await trackEdit(call, { track: name, action: 'color', color: '#1e90ff' });
+    assert.equal(c.after, '#1e90ff');
+    assert.equal((await call('tracks', { name, events: false })).find((x) => x.name === name).color, '#1e90ff', 'the track shows the colour');
+  } finally {
+    await trackEdit(call, { track: name, action: 'remove' });
+  }
+  const song1 = await call('song');
+  assert.equal(song1.trackCount, song0.trackCount);
+  for (const [i, n] of song0.selectedTracks.entries()) await call('selectTrack', { name: n, exclusive: i === 0 });
+  assert.deepEqual((await call('song')).selectedTracks, song0.selectedTracks);
+});
+
+test('plug-in snapshot: save, change a parameter, restore brings it back', async (t) => {
+  const rack = (await call('inserts', {})).find((c) => c.inserts.some((i) => pluginParamNames(i.name).names.length));
+  if (!rack) return t.skip('no channel has a PreSonus plug-in');
+  const slot = rack.inserts.find((i) => pluginParamNames(i.name).names.length).slot;
+  const dir = mkdtempSync(join(tmpdir(), 's1snap-live-'));
+  const at = { channel: rack.channel, slot };
+  await snapshot(call, { action: 'save', ...at, name: 'live test' }, { dir });
+  const all = (await call('pluginParams', { ...at, names: pluginParamNames(rack.inserts.find((i) => i.slot === slot).name).names })).params;
+  const p = all.find((x) => typeof x.normalized === 'number' && x.max - x.min > 1);
+  try {
+    await call('setPluginParam', { ...at, param: p.name, normalized: p.normalized > 0.5 ? 0.25 : 0.75 });
+  } finally {
+    const r = await snapshot(call, { action: 'restore', ...at, name: 'live test' }, { dir });
+    assert.ok(r.changedParams.includes(p.name), `${p.name} restored`);
+  }
+  const back = (await call('pluginParams', { ...at, names: [p.name] })).params[0];
+  assert.equal(back.value, p.value);
+});
+
+// Record modes are not exercised: they cannot be read, so they could not be restored.
+test('metronome: flip click and precount length, restore both', async () => {
+  const m0 = await call('metronome', {});
+  assert.equal(typeof m0.click, 'boolean');
+  assert.ok(m0.precountBars >= 1 && m0.precountBars <= 16);
+  const bars = m0.precountBars === 2 ? 1 : 2;
+  try {
+    assert.deepEqual(await call('metronome', { click: !m0.click, precountBars: bars }), { ...m0, click: !m0.click, precountBars: bars });
+  } finally {
+    assert.deepEqual(await call('metronome', { click: m0.click, precountBars: m0.precountBars }), m0);
+  }
 });
 
 test('sends: set a level and restore it', async (t) => {

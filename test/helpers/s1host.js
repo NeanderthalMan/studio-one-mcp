@@ -33,6 +33,11 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
     loopEnd: param('loopEnd', 16, { display: bars }),
   };
   const transportPanel = { findParameter: (n) => params[n] || null };
+  // Environment/Metronome as on 5.5.2: clickOn/precount/preroll 0..1, bars 1..16.
+  const metro = {
+    clickOn: param('clickOn', 1), precount: param('precount', 0), preroll: param('preroll', 0), bars: param('bars', 1, { min: 1, max: 16 }),
+  };
+  const metronome = { params: metro, findParameter: (n) => metro[n] || null };
   // takeEvents: one events array per take; `events` is shorthand for a single take.
   const makeTrack = (t, i) => {
     const takes = (t.takeEvents || [t.events || []]).map((list) => list.map((e) => ({ ...e })));
@@ -43,7 +48,16 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
       currentEvents: () => takes[o.activeTake] || [],
       isEmpty: () => !o.currentEvents().length,
       createIterator: () => {
-        const evs = o.currentEvents().map((e) => ({ name: e.name, startTime: { seconds: e.start }, endTime: { seconds: e.end }, isMuted: e.muted ? 1 : 0 }));
+        // A part with `notes` walks them like 5.5.2 does: createSequenceIterator() with done()/next().
+        const seq = (notes) => () => {
+          const ns = notes.map((n) => ({ pitch: n.pitch, velocity: n.velocity, startTime: { seconds: n.start, musical: n.start * 2 }, endTime: { seconds: n.end } }));
+          let k = 0;
+          return { done: () => k >= ns.length, next: () => ns[k++] || null };
+        };
+        const evs = o.currentEvents().map((e) => ({
+          name: e.name, startTime: { seconds: e.start }, endTime: { seconds: e.end }, isMuted: e.muted ? 1 : 0,
+          ...(e.notes ? { createSequenceIterator: seq(e.notes) } : {}),
+        }));
         let k = 0;
         return { next: () => evs[k++] || null };
       },
@@ -70,6 +84,7 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
     urls: {
       '://studioapp/DocumentManager': { activeDocument: { title, path: { url: `file:///songs/${title}/${title}.song` } } },
       '://hostapp/DocumentManager/ActiveDocument/Environment/TransportPanel': transportPanel,
+      '://hostapp/DocumentManager/ActiveDocument/Environment/Metronome': metronome,
       '://hostapp/DocumentManager/ActiveDocument/TrackList': { mainTrackList },
     },
   };
@@ -197,7 +212,7 @@ export function fakeMixer(channels) {
 }
 
 const ParamID = {
-  kLabel: 'label', kVolume: 'volume', kPan: 'pan', kRecord: 'recordArmed', kChannelType: 'channelType', kAutoMode: 'automationMode',
+  kLabel: 'label', kVolume: 'volume', kPan: 'pan', kRecord: 'recordArmed', kChannelType: 'channelType', kAutoMode: 'automationMode', kColor: 'color',
   kInsertName: '@owner/deviceName', kInsertBypass: 'Inserts/bypassAll', kSendPort: 'sendPort', kSendLevel: 'sendlevel', kSendMute: 'sendMute',
 };
 

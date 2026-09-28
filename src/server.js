@@ -17,6 +17,9 @@ import { midiPort } from './midi.js';
 import { pluginParamNames } from './plugins.js';
 import { arranger, listMacros, runMacro } from './arranger.js';
 import { tempo } from './tempo.js';
+import { trackEdit } from './tracks.js';
+import { recordSetup } from './record.js';
+import { snapshot } from './snapshots.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -41,7 +44,7 @@ server.tool(
 
 server.tool(
   'song_read',
-  'Read a Studio One song from its .song file: tempo, time signature, markers, arranger sections, tracks with takes/clips (bar, beat and seconds), mixer channels with volume/pan/mute/solo and plug-in inserts, and media files. Reflects the last save, not unsaved edits.',
+  "Read a Studio One song from its .song file: tempo, time signature, markers, arranger sections, tracks with takes/clips (bar, beat and seconds) and instrument notes, mixer channels with volume/pan/mute/solo, automation mode and plug-in inserts (with each plug-in's saved settings in its own units, for PreSonus plug-ins), automation envelopes that have points, and media files. Reflects the last save, not unsaved edits. Notes, settings and envelope points are in detail=full.",
   {
     song: z.string().describe('Song title, part of one (newest match wins), or absolute path to a .song file'),
     detail: z.enum(['summary', 'full']).optional().describe('summary (default): one line per track. full: every take and clip.'),
@@ -131,6 +134,21 @@ server.tool(
     max_events: z.number().int().optional().describe('Per track (default 50)'),
   },
   guard(({ name, events, max_events }) => call('tracks', { name, events, maxEvents: max_events })),
+);
+
+// Studio One's default note names: middle C (MIDI 60) is C3.
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const noteName = (p) => `${NOTE_NAMES[p % 12]}${Math.floor(p / 12) - 2}`;
+
+server.tool(
+  'live_notes',
+  "Notes in an instrument track's parts in the running Studio One, unsaved edits included: pitch (MIDI number and name, middle C = C3 as Studio One shows it by default), velocity 0-127, start/end/length in seconds, and start in quarter-note beats. Read-only.",
+  { track: z.string().describe('Exact track name'), max_notes: z.number().int().optional().describe('Default 500') },
+  guard(async ({ track, max_notes }) => {
+    const r = await call('notes', { track, maxNotes: max_notes });
+    for (const p of r.parts) for (const n of p.notes) if (typeof n.pitch === 'number') n.note = noteName(n.pitch);
+    return r;
+  }),
 );
 
 server.tool(
@@ -424,13 +442,59 @@ server.tool(
 
 server.tool(
   'live_tempo',
-  "Tempo map of the running Studio One (stopped). at: tempo at one or more positions. set: change the tempo of the segment containing a position (default: the playhead). insert: add a tempo change at a position with its bpm (two undo steps: live_undo steps 2 removes it). Positions are seconds or bars like \"9.1.1.0\"; the playhead is put back. For the whole saved map, and time signatures, use song_read.",
+  "Tempo map of the running Studio One (stopped). at: tempo at one or more positions. set: change the tempo of the segment containing a position (default: the playhead). insert: add a tempo change at a position with its bpm. Removing one needs live_undo (usually two steps), and Studio One has refused an undo right after a tempo edit, so check with action at afterwards; setting a segment back is exact. Positions are seconds or bars like \"9.1.1.0\"; the playhead is put back. For the whole saved map, and time signatures, use song_read.",
   {
     action: z.enum(['at', 'set', 'insert']),
     at: z.union([TIME, z.array(TIME)]).optional(),
     bpm: z.number().optional(),
   },
   guard((a) => tempo(call, a)),
+);
+
+server.tool(
+  'live_plugin_snapshot',
+  "Save a plug-in's current settings under a name, restore them onto the same kind of plug-in (any channel), or list saved snapshots. A stand-in for presets that works remotely: it stores every known parameter's raw value (PreSonus plug-ins; names as in live_plugin_params) in the studio-one-mcp data folder. Restore only sets parameters that differ.",
+  {
+    action: z.enum(['save', 'restore', 'list']),
+    channel: z.string().optional(),
+    slot: z.number().int().optional(),
+    name: z.string().optional(),
+    plugin: z.string().optional().describe('For list: only this plug-in'),
+  },
+  guard((a) => {
+    if (a.action !== 'list' && (a.channel === undefined || a.slot === undefined)) throw new Error(`${a.action} needs channel and slot`);
+    return snapshot(call, a);
+  }),
+);
+
+server.tool(
+  'live_record_setup',
+  'Recording setup in the running Studio One. With no arguments, reads the metronome: click, precount, precount length in bars, preroll. Set any of those, and/or record modes: replace, loopTakes or loopMix, takesToLayers, inputQuantize, noteErase (true/false). Record modes cannot be read back from Studio One, so they are reported as set, not confirmed.',
+  {
+    click: z.boolean().optional(),
+    precount: z.boolean().optional(),
+    precountBars: z.number().int().optional().describe('1-16'),
+    preroll: z.boolean().optional(),
+    replace: z.boolean().optional(),
+    loopTakes: z.boolean().optional(),
+    loopMix: z.boolean().optional(),
+    takesToLayers: z.boolean().optional(),
+    inputQuantize: z.boolean().optional(),
+    noteErase: z.boolean().optional(),
+  },
+  guard((a) => recordSetup(call, a)),
+);
+
+server.tool(
+  'live_track_edit',
+  'Edit a track by exact name in the running Studio One: rename (and its mixer channel), color ("#rrggbb"), or remove. Rename and colour are not on the undo stack (the result has the "before" value); remove undoes with live_undo. The track selection is kept.',
+  {
+    track: z.string(),
+    action: z.enum(['rename', 'color', 'remove']),
+    name: z.string().optional().describe('For rename'),
+    color: z.string().optional().describe('For color: "#rrggbb"'),
+  },
+  guard((a) => trackEdit(call, a)),
 );
 
 // Sections of the open song as of its last save (the arranger track is not scriptable live).
@@ -443,7 +507,7 @@ async function savedSections() {
 
 server.tool(
   'live_arranger',
-  "Arranger sections in the running Studio One. sections: list them (numbered in song order, from the last save). goto: a section by number or name; while playing it jumps at the arranger's sync point, while stopped it moves the playhead to the section's start. next / previous: step while playing. syncMode: when jumps happen (off = immediately, 1bar, 2bars, 4bars, end of section). createFromMarkers: make sections between markers (undo with live_undo). The loop range is kept.",
+  "Arranger sections in the running Studio One. sections: list them (numbered in song order, from the last save). goto: a section by number or name; while playing it jumps at the arranger's sync point, while stopped it moves the playhead to the section's start. next / previous: step while playing. syncMode: when jumps happen (off = immediately, 1bar, 2bars, 4bars, end of section); changing it is an undo step. createFromMarkers: make sections between markers (undo with live_undo). The loop range is kept.",
   {
     action: z.enum(['sections', 'goto', 'next', 'previous', 'syncMode', 'createFromMarkers']),
     section: z.union([z.number().int(), z.string()]).optional().describe('For goto: section number (1-16) or name'),

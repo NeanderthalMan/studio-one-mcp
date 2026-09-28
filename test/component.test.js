@@ -75,6 +75,16 @@ test('automation: mode per channel by name; setAutomation validates and reports 
   assert.match(ring('setAutomation', { channel: 'Z', mode: 'off' }).error, /no channel named Z/);
 });
 
+test('setChannelLabel / setChannelColor: by channel label; validation', () => {
+  const { ring, mixer } = setup({ channels: [{ label: 'A' }, { label: 'B' }] });
+  assert.deepEqual(plain(ring('setChannelLabel', { channel: 'A', name: 'Vox' }).result), { before: 'A', after: 'Vox' });
+  assert.equal(mixer.elements[0].params.label, 'Vox');
+  assert.match(ring('setChannelLabel', { channel: 'B', name: '' }).error, /non-empty/);
+  const c = plain(ring('setChannelColor', { channel: 'B', argb: 0xff0000ff | 0 }).result);
+  assert.equal(c.after, 0xff0000ff | 0);
+  assert.match(ring('setChannelColor', { channel: 'Z', argb: 1 }).error, /no channel named Z/);
+});
+
 test('channels: unlabeled and disconnected strips are skipped', () => {
   const { ring, mixer } = setup({ channels: [{ label: 'A' }, { label: '' }, { label: 'C' }] });
   mixer.elements[2].isConnected = () => false;
