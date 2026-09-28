@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { listSongs, resolveSong, songFolder } from './library.js';
 import { bridgeStatus, call } from './bridge.js';
 import { midiPort } from './midi.js';
+import { pluginParamNames } from './plugins.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -311,6 +312,48 @@ server.tool(
   'Set a send level (0..1) and/or mute on a channel in the running Studio One (index from live_sends).',
   { channel: z.string(), index: z.number().int(), level: z.number().optional(), muted: z.boolean().optional() },
   guard((a) => call('setSend', a)),
+);
+
+server.tool(
+  'live_plugin_params',
+  "Parameters of one plug-in on a channel in the running Studio One (slot from live_inserts): name, value, display text (e.g. \"2.0:1\", \"-12.0 dB\"), range and normalised value. Studio One cannot list a plug-in's parameters, so names come from its presets and Studio One's remote-control map; this works for PreSonus plug-ins. For others, pass the names in `params`.",
+  {
+    channel: z.string(),
+    slot: z.number().int(),
+    filter: z.string().optional().describe('Only parameters whose name contains this (e.g. "comp", "freq")'),
+    params: z.array(z.string()).optional().describe('Exact parameter names to read instead of the discovered ones'),
+  },
+  guard(async ({ channel, slot, filter, params }) => {
+    const rack = (await call('inserts', { channel }))[0];
+    const plug = rack && rack.inserts.find((i) => i.slot === slot);
+    if (!plug) throw new Error(`no plug-in in slot ${slot} on ${channel}`);
+    const known = params?.length ? { names: params, sources: ['params'] } : pluginParamNames(plug.name);
+    const want = filter ? known.names.filter((n) => n.toLowerCase().includes(filter.toLowerCase())) : known.names;
+    if (!want.length) {
+      return { channel, slot, plugin: plug.name, params: [], note: known.names.length ? `no parameter name contains "${filter}"` : `no parameter names known for ${plug.name}; pass them in params` };
+    }
+    const r = await call('pluginParams', { channel, slot, names: want });
+    // Discovered names the plug-in does not answer to are noise (other versions, UI state); given ones are not.
+    return params?.length ? r : { channel: r.channel, slot: r.slot, plugin: r.plugin, params: r.params };
+  }),
+);
+
+server.tool(
+  'live_set_plugin_param',
+  'Set one plug-in parameter on a channel in the running Studio One (names from live_plugin_params). Give exactly one of: text, as Studio One displays it (e.g. "4.0:1", "-12 dB", "Standard"); normalized, 0..1; or value, the raw value within its min..max. Returns before/after; to revert, set the "before" value.',
+  {
+    channel: z.string(),
+    slot: z.number().int(),
+    param: z.string(),
+    text: z.string().optional(),
+    normalized: z.number().optional(),
+    value: z.number().optional(),
+  },
+  guard((a) => {
+    const given = ['text', 'normalized', 'value'].filter((k) => a[k] !== undefined);
+    if (given.length !== 1) throw new Error('give exactly one of text, normalized or value');
+    return call('setPluginParam', a);
+  }),
 );
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

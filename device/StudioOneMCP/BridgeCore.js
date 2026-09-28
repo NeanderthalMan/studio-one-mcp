@@ -158,6 +158,8 @@ class Bridge {
             case "setInsertBypass": return this.fromComponent(c => c.setInsertBypass(args));
             case "sends": return this.fromComponent(c => c.sends(args));
             case "setSend": return this.fromComponent(c => c.setSend(args));
+            case "pluginParams": return this.fromComponent(c => c.pluginParams(args));
+            case "setPluginParam": return this.fromComponent(c => c.setPluginParam(args));
             case "eval": return this.evaluate(args);
             default: return fail("unknown op: " + op);
         }

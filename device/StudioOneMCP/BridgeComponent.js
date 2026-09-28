@@ -206,6 +206,74 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         return out;
     }
 
+    // ---- plug-in parameters -----------------------------------------------------
+    //
+    // An insert slot's component ("FX01") has a child component "Device": the
+    // plug-in itself. Its parameters are found by name ("comp.threshold" on the
+    // Fat Channel, "lffreq" on the Pro EQ) and give value, display text, range and
+    // a normalised value. The host cannot list them, so the server sends the names
+    // (from the plug-in's presets); unknown names come back as null, never throw.
+
+    pluginOf(args) {
+        const c = this.channelByLabel(args.channel);
+        if (c.error) return c;
+        const slot = this.insertsOf(c.el).find(x => x.slot === args.slot);
+        if (!slot) return { error: "no plug-in in slot " + args.slot + " on " + args.channel };
+        const el = this.subBank(c.el, "inserts").getElement(args.slot);
+        const comp = el ? el.component : null;
+        const dev = comp && typeof comp.find === "function" ? comp.find("Device") : null;
+        if (!dev || typeof dev.findParameter !== "function") return { error: "cannot reach the plug-in in slot " + args.slot + " on " + args.channel };
+        return { name: slot.name, device: dev };
+    }
+
+    paramInfo(p) {
+        return {
+            name: p.name,
+            value: p.value,
+            text: typeof p.string === "string" ? p.string : null,
+            min: p.min,
+            max: p.max,
+            normalized: typeof p.getNormalized === "function" ? p.getNormalized() : null,
+        };
+    }
+
+    pluginParams(args) {
+        const plug = this.pluginOf(args);
+        if (plug.error) return plug;
+        const names = Array.isArray(args.names) ? args.names : [];
+        const params = [];
+        const missing = [];
+        for (const n of names) {
+            const p = plug.device.findParameter(String(n));
+            if (p) params.push(this.paramInfo(p));
+            else missing.push(String(n));
+        }
+        return { channel: args.channel, slot: args.slot, plugin: plug.name, params: params, missing: missing };
+    }
+
+    // One of: text (display text, e.g. "4.0:1" or "-12 dB"), normalized (0..1), value (raw).
+    setPluginParam(args) {
+        const plug = this.pluginOf(args);
+        if (plug.error) return plug;
+        const p = plug.device.findParameter(String(args.param));
+        if (!p) return { error: "no parameter " + args.param + " on " + plug.name + " (live_plugin_params lists them)" };
+        const before = this.paramInfo(p);
+        if (args.text !== undefined) {
+            if (typeof p.fromString !== "function") return { error: "parameter " + args.param + " does not take text" };
+            p.fromString(String(args.text), true);
+        } else if (args.normalized !== undefined) {
+            if (typeof args.normalized !== "number" || args.normalized < 0 || args.normalized > 1) return { error: "normalized must be 0..1" };
+            if (typeof p.setNormalized !== "function") return { error: "parameter " + args.param + " has no normalised value" };
+            p.setNormalized(args.normalized, true);
+        } else if (args.value !== undefined) {
+            if (typeof p.setValue !== "function") return { error: "parameter " + args.param + " cannot be set" };
+            p.setValue(args.value, true);
+        } else {
+            return { error: "give one of text, normalized or value" };
+        }
+        return { channel: args.channel, slot: args.slot, plugin: plug.name, param: String(args.param), before: before, after: this.paramInfo(p) };
+    }
+
     setChannel(args) {
         const fields = { volume: PreSonus.ParamID.kVolume, pan: PreSonus.ParamID.kPan, mute: "mute", solo: "solo", recordArmed: PreSonus.ParamID.kRecord };
         const param = fields[args.field];

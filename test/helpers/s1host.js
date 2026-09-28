@@ -131,6 +131,26 @@ export function fakeHost({ commands = [], document = null } = {}) {
   return { Host, files, logs, executed, client };
 }
 
+// A plug-in's parameters as the Device component showed them on 5.5.2:
+// raw value within min..max, display text, normalised value, fromString.
+// spec: { 'comp.ratio': { value, min, max, unit } } (display = value + unit).
+export function fakePlugin(spec) {
+  const params = {};
+  for (const [name, s] of Object.entries(spec)) {
+    const min = s.min ?? 0;
+    const max = s.max ?? 1;
+    params[name] = {
+      name, value: s.value ?? min, min, max,
+      get string() { return `${this.value}${s.unit || ''}`; },
+      getNormalized() { return (this.value - min) / (max - min); },
+      setNormalized(n) { this.value = min + n * (max - min); },
+      setValue(v) { this.value = v; },
+      fromString(str) { this.value = parseFloat(str); },
+    };
+  }
+  return { name: 'Plugin', params, findParameter: (n) => params[n] || null };
+}
+
 // Mixer bank of the kind the surface's ScrollBank exposes.
 // Each channel may have inserts [{ name, bypassed }] and sends [{ to, level, muted }],
 // exposed like the surface file's sub-banks: el.find('inserts'|'sends').getElement(i).
@@ -140,7 +160,11 @@ export function fakeMixer(channels) {
     const els = items.map((it) => {
       const p = paramsOf(it);
       const display = { sendPort: () => it.to, sendlevel: () => `${(20 * Math.log10(Math.max(p.sendlevel, 1e-6))).toFixed(1)}` };
+      // An insert's plug-in: slot.component.find('Device').findParameter(name).
+      const device = it.params ? fakePlugin(it.params) : null;
       return {
+        device,
+        component: device ? { name: 'FX01', find: (n) => (n === 'Device' ? device : null) } : undefined,
         params: p, isConnected: () => true, getParamValue: (id) => p[id], setParamValue: (id, v) => ((p[id] = v), true),
         // Real sendPort values are list indexes (-1 for the default bus); the name is only display text.
         connectAliasParam: (alias, id) => (alias.string = display[id] ? display[id]() : String(p[id])),
