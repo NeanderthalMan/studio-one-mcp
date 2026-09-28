@@ -141,6 +141,10 @@ class Bridge {
             case "selectTrack": return this.selectTrack(args);
             case "transport": return this.transport(args);
             case "setTransport": return this.setTransport(args);
+            case "markers": return this.markers();
+            case "addMarker": return this.addMarker(args);
+            case "deleteMarker": return this.deleteMarker(args);
+            case "selectEvents": return this.selectEvents(args);
             case "eval": return this.evaluate(args);
             default: return fail("unknown op: " + op);
         }
@@ -212,8 +216,10 @@ class Bridge {
         const dm = appObject("DocumentManager");
         const doc = dm && has(dm, "activeDocument", "object") ? dm.activeDocument : null;
         const list = trackList();
+        const path = doc && has(doc, "path", "object") && has(doc.path, "url", "string") ? doc.path.url : null;
         return {
             title: doc ? String(doc.title) : null,
+            fileUrl: path,
             transport: transport,
             trackCount: list ? uniqueTracks(list).length : null,
             selectedTracks: list ? selectedTracks(list).map(t => String(t.name)) : [],
@@ -306,6 +312,103 @@ class Bridge {
             }
         }
         return this.transportState();
+    }
+
+    // ---- markers --------------------------------------------------------------
+    //
+    // The marker track is not reachable from scripts, but its commands are:
+    // "Recall Marker N" is enabled for each existing marker and moves the playhead
+    // there. So positions are read by recalling each marker in turn and putting
+    // the playhead back. Names are not exposed (the MCP server adds them from the
+    // saved .song). Only markers 1-20 have recall commands.
+
+    markerPositions() {
+        const tp = this.transportPanel();
+        if (!tp) return fail("no song open");
+        const pt = tp.findParameter("primaryTime");
+        if (!pt || !has(pt, "setValue", "function")) return fail("position parameter not available");
+        const state = this.transportState();
+        if (state.playing) return fail("stop playback first: reading markers moves the playhead");
+        const C = Host.GUI.Commands;
+        const home = pt.value;
+        const out = [];
+        for (let n = 1; n <= 20; n++) {
+            const name = "Recall Marker " + n;
+            if (!C.findCommand("Marker", name)) break;
+            if (!C.interpretCommand("Marker", name, true)) continue;
+            C.interpretCommand("Marker", name);
+            out.push({ number: n, seconds: pt.value, display: String(pt.string) });
+        }
+        pt.setValue(home, true);
+        return out;
+    }
+
+    markers() {
+        const list = this.markerPositions();
+        return isFail(list) ? list : { markers: list };
+    }
+
+    addMarker(args) {
+        const tp = this.transportPanel();
+        if (!tp) return fail("no song open");
+        const pt = tp.findParameter("primaryTime");
+        const home = pt.value;
+        const at = args.seconds === undefined ? home : args.seconds;
+        if (typeof at !== "number" || at < 0) return fail("seconds must be a number >= 0");
+        pt.setValue(at, true);
+        const r = this.command({ category: "Marker", name: "Insert" });
+        pt.setValue(home, true);
+        if (isFail(r)) return r;
+        const list = this.markerPositions();
+        return isFail(list) ? list : { added: r.executed, seconds: at, markers: list };
+    }
+
+    deleteMarker(args) {
+        const list = this.markerPositions();
+        if (isFail(list)) return list;
+        const target = args.number !== undefined
+            ? list.find(m => m.number === args.number)
+            : list.find(m => typeof args.seconds === "number" && Math.abs(m.seconds - args.seconds) < 0.001);
+        if (!target) return fail("no marker " + (args.number !== undefined ? "number " + args.number : "at " + args.seconds + "s"));
+        const pt = this.transportPanel().findParameter("primaryTime");
+        const home = pt.value;
+        this.command({ category: "Marker", name: "Recall Marker " + target.number });
+        const r = this.command({ category: "Marker", name: "Delete" });
+        pt.setValue(home, true);
+        if (isFail(r)) return r;
+        const after = this.markerPositions();
+        return isFail(after) ? after : { deleted: target, markers: after };
+    }
+
+    // ---- event selection ------------------------------------------------------
+    //
+    // Studio One's event commands (Event/Mute Events, Edit/Split at Cursor,
+    // Track/Activate Next Layer...) act on the selection. This selects every
+    // event on the named tracks (or on all tracks) so live_command can follow.
+
+    selectEvents(args) {
+        const list = trackList();
+        if (!list) return fail("no song open");
+        const C = Host.GUI.Commands;
+        this.command({ category: "Edit", name: "Deselect All" });
+        if (args.none) return { selectedTracks: selectedTracks(list).map(t => String(t.name)), events: "none" };
+        if (args.all) {
+            const r = this.command({ category: "Edit", name: "Select All" });
+            if (isFail(r)) return r;
+        } else {
+            const names = Array.isArray(args.tracks) ? args.tracks : [args.track];
+            if (!names.length || names.some(n => typeof n !== "string")) return fail("track (or tracks, or all) is required");
+            for (let i = 0; i < names.length; i++) {
+                const r = this.selectTrack({ name: names[i], exclusive: i === 0 });
+                if (isFail(r)) return r;
+            }
+            const r = this.command({ category: "Edit", name: "Select All on Tracks" });
+            if (isFail(r)) return r;
+        }
+        return {
+            selectedTracks: selectedTracks(list).map(t => String(t.name)),
+            eventCommandsEnabled: !!C.interpretCommand("Event", "Mute Events", true),
+        };
     }
 
     // Arbitrary script, for exploring the host object model. Off unless the
