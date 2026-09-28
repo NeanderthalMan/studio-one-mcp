@@ -16,6 +16,7 @@ import { bridgeStatus, call } from './bridge.js';
 import { midiPort } from './midi.js';
 import { pluginParamNames } from './plugins.js';
 import { arranger, listMacros, runMacro } from './arranger.js';
+import { tempo } from './tempo.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -419,6 +420,17 @@ server.tool(
   'List Studio One commands available to live_command (about 1,000 on Studio One 5), optionally filtered by a substring. with_state adds whether each is enabled right now; many need a selection or an open editor.',
   { filter: z.string().optional(), with_state: z.boolean().optional() },
   guard(({ filter, with_state }) => call('listCommands', { filter, withState: !!with_state }, { timeoutMs: 15000 })),
+);
+
+server.tool(
+  'live_tempo',
+  "Tempo map of the running Studio One (stopped). at: tempo at one or more positions. set: change the tempo of the segment containing a position (default: the playhead). insert: add a tempo change at a position with its bpm (two undo steps: live_undo steps 2 removes it). Positions are seconds or bars like \"9.1.1.0\"; the playhead is put back. For the whole saved map, and time signatures, use song_read.",
+  {
+    action: z.enum(['at', 'set', 'insert']),
+    at: z.union([TIME, z.array(TIME)]).optional(),
+    bpm: z.number().optional(),
+  },
+  guard((a) => tempo(call, a)),
 );
 
 // Sections of the open song as of its last save (the arranger track is not scriptable live).

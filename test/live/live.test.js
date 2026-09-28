@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { bridgeStatus, call } from '../../src/bridge.js';
 import { pluginParamNames } from '../../src/plugins.js';
 import { arranger, listMacros, runMacro } from '../../src/arranger.js';
+import { tempo } from '../../src/tempo.js';
 
 let channels;
 let testChannel;
@@ -416,6 +417,31 @@ test('arranger: sections from markers, jump while playing, all restored', async 
   }
   assert.deepEqual((await call('markers')).markers.map((m) => m.seconds), markers0);
   assert.equal(await arrangerShown(), shown0, 'arranger track shown/hidden as before');
+});
+
+// Insert + set are two undo steps. "Tempo/Delete" is not used: it did not delete
+// the point at the playhead. A single-segment map is checked by changing the tempo
+// late in the song and seeing it at 2 s too (then undoing that).
+test('tempo: insert a change at 4 s, read it, two undos remove it', async () => {
+  const t0 = (await call('song')).transport;
+  const at = async (s) => (await tempo(call, { action: 'at', at: [s] })).tempo[0].bpm;
+  const base = await at(2);
+  assert.equal(await at(6), base, 'no tempo change between 2 s and 6 s to begin with');
+  const bpm = base === 90 ? 100 : 90;
+  const r = await tempo(call, { action: 'insert', at: 4, bpm });
+  try {
+    assert.equal(r.inserted.bpm, bpm);
+    assert.deepEqual([await at(2), await at(6)], [base, bpm]);
+  } finally {
+    await call('undo', { steps: 2 });
+  }
+  assert.deepEqual([await at(2), await at(6)], [base, base]);
+  await tempo(call, { action: 'set', at: 6, bpm: base + 1 });
+  const reach = await at(2);
+  await call('undo', {});
+  assert.equal(reach, base + 1, 'the point at 4 s is gone: one segment again');
+  assert.equal(await at(2), base);
+  assert.equal((await call('song')).transport.position.seconds, t0.position.seconds);
 });
 
 test('sends: set a level and restore it', async (t) => {
