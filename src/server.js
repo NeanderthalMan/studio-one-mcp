@@ -286,6 +286,72 @@ server.tool(
 );
 
 server.tool(
+  'live_inserts',
+  'Plug-ins on each mixer channel of the running Studio One (or one channel): slot, plug-in name, bypassed; plus the channel\'s bypass-all switch.',
+  { channel: z.string().optional() },
+  guard((a) => call('inserts', a)),
+);
+
+server.tool(
+  'live_bypass_insert',
+  'Bypass or un-bypass one plug-in slot on a channel in the running Studio One (slot number from live_inserts), or the whole insert rack with slot "all".',
+  { channel: z.string(), slot: z.union([z.number().int(), z.literal('all')]), bypassed: z.boolean() },
+  guard((a) => call('setInsertBypass', a)),
+);
+
+server.tool(
+  'live_sends',
+  'Sends on each mixer channel of the running Studio One (or one channel): destination, level (0..1, Studio One normalised) and mute.',
+  { channel: z.string().optional() },
+  guard((a) => call('sends', a)),
+);
+
+server.tool(
+  'live_set_send',
+  'Set a send level (0..1) and/or mute on a channel in the running Studio One (index from live_sends).',
+  { channel: z.string(), index: z.number().int(), level: z.number().optional(), muted: z.boolean().optional() },
+  guard((a) => call('setSend', a)),
+);
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+server.tool(
+  'live_record',
+  'Record in the running Studio One. This writes a new take into the song, so it only runs with confirm: true, which should mean the user asked for it. Optionally arms a track first, starts from a position (seconds or bars), sets precount, and stops after `seconds`; without `seconds` it keeps recording until live_transport stop.',
+  {
+    confirm: z.literal(true).describe('Must be true: the user asked to record'),
+    track: z.string().optional().describe('Arm this track first (left armed afterwards)'),
+    from: TIME.optional(),
+    precount: z.boolean().optional(),
+    seconds: z.number().optional().describe('Stop after this many seconds (max 600)'),
+  },
+  guard(async ({ track, from, precount, seconds }) => {
+    if (seconds !== undefined && (seconds <= 0 || seconds > 600)) throw new Error('seconds must be 0-600');
+    const song = await call('song');
+    if (song.transport.playing || song.transport.recording) throw new Error('Studio One is already playing or recording; stop first');
+    let armed = null;
+    if (track) {
+      const t = (await call('tracks', { name: track, events: false })).find((x) => x.name === track);
+      if (!t) throw new Error(`no track named ${track}`);
+      const ch = (await call('channels')).find((c) => c.label === t.channel);
+      if (ch && !ch.recordArmed) await call('trackState', { track, action: 'arm' });
+      armed = track;
+    }
+    const setup = {};
+    if (typeof from === 'number') setup.positionSeconds = from;
+    if (typeof from === 'string') setup.positionBars = from;
+    if (precount !== undefined) setup.precount = precount;
+    if (Object.keys(setup).length) await call('setTransport', setup);
+    const started = await call('transport', { action: 'record' });
+    if (seconds === undefined) return { recording: true, armed, transport: started.transport, note: 'Call live_transport with action "stop" to finish.' };
+    await sleep(seconds * 1000);
+    const stopped = await call('transport', { action: 'stop' });
+    const after = armed ? (await call('tracks', { name: armed })).find((x) => x.name === armed) : null;
+    return { recorded: seconds, armed, transport: stopped.transport, track: after };
+  }),
+);
+
+server.tool(
   'live_command',
   'Run any Studio One command by category and name, exactly as listed in Studio One → Keyboard Shortcuts (e.g. Transport/Start, Transport/Stop, Transport/Record, Edit/Undo, File/Save, View/Console). Use live_list_commands to discover names. With check_only, only reports whether the command is currently enabled, without running it.',
   {

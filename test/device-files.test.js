@@ -70,3 +70,9 @@ test('device scripts never throw (Studio One turns that into an error dialog)', 
     assert.doesNotMatch(code, /\bthrow\b/, f);
   }
 });
+
+test('each mixer channel strip carries inserts and sends sub-banks', () => {
+  const bank = [...walk(surface)].find((n) => n.tag === 'ScrollBank' && n.attrs.name === 'channels');
+  const strip = [...walk(bank)].find((n) => n.tag === 'Strip' && kids(n, 'Bank').length);
+  assert.deepEqual(kids(strip, 'Bank').map((b) => [b.attrs.target, b.attrs.name]), [['Inserts', 'inserts'], ['Sends', 'sends']]);
+});

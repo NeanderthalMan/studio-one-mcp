@@ -154,6 +154,10 @@ class Bridge {
             case "editEvents": return this.editEvents(args);
             case "addTrack": return this.addTrack(args);
             case "meters": return this.fromComponent(c => c.meters());
+            case "inserts": return this.fromComponent(c => c.inserts(args));
+            case "setInsertBypass": return this.fromComponent(c => c.setInsertBypass(args));
+            case "sends": return this.fromComponent(c => c.sends(args));
+            case "setSend": return this.fromComponent(c => c.setSend(args));
             case "eval": return this.evaluate(args);
             default: return fail("unknown op: " + op);
         }

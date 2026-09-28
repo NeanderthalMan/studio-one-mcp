@@ -132,11 +132,33 @@ export function fakeHost({ commands = [], document = null } = {}) {
 }
 
 // Mixer bank of the kind the surface's ScrollBank exposes.
+// Each channel may have inserts [{ name, bypassed }] and sends [{ to, level, muted }],
+// exposed like the surface file's sub-banks: el.find('inserts'|'sends').getElement(i).
+// Insert bypass lives on the channel as "Inserts/[i]/@bypass" (and "Inserts/bypassAll").
 export function fakeMixer(channels) {
+  const bankOf = (items, paramsOf) => {
+    const els = items.map((it) => {
+      const p = paramsOf(it);
+      const display = { sendPort: () => it.to, sendlevel: () => `${(20 * Math.log10(Math.max(p.sendlevel, 1e-6))).toFixed(1)}` };
+      return {
+        params: p, isConnected: () => true, getParamValue: (id) => p[id], setParamValue: (id, v) => ((p[id] = v), true),
+        // Real sendPort values are list indexes (-1 for the default bus); the name is only display text.
+        connectAliasParam: (alias, id) => (alias.string = display[id] ? display[id]() : String(p[id])),
+      };
+    });
+    return { getElement: (i) => els[i] || null, els };
+  };
   const elements = channels.map((c) => {
-    const params = { label: c.label, volume: c.volume ?? 1, pan: c.pan ?? 0.5, mute: c.mute ?? 0, solo: c.solo ?? 0, recordArmed: c.recordArmed ?? 0 };
+    const params = { label: c.label, volume: c.volume ?? 1, pan: c.pan ?? 0.5, mute: c.mute ?? 0, solo: c.solo ?? 0, recordArmed: c.recordArmed ?? 0, 'Inserts/bypassAll': 0 };
+    (c.inserts || []).forEach((x, i) => (params[`Inserts/[${i}]/@bypass`] = x.bypassed ? 1 : 0));
+    const banks = {
+      inserts: bankOf(c.inserts || [], (x) => ({ '@owner/deviceName': x.name })),
+      sends: bankOf(c.sends || [], (x) => ({ sendPort: -1, sendlevel: x.level ?? 0.5, sendMute: x.muted ? 1 : 0 })),
+    };
     return {
       params,
+      banks,
+      find: (name) => banks[name] || null,
       isConnected: () => true,
       getParamValue: (id) => params[id],
       setParamValue: (id, v) => {
@@ -150,7 +172,10 @@ export function fakeMixer(channels) {
   return { elements, model };
 }
 
-const ParamID = { kLabel: 'label', kVolume: 'volume', kPan: 'pan', kRecord: 'recordArmed', kChannelType: 'channelType' };
+const ParamID = {
+  kLabel: 'label', kVolume: 'volume', kPan: 'pan', kRecord: 'recordArmed', kChannelType: 'channelType',
+  kInsertName: '@owner/deviceName', kInsertBypass: 'Inserts/bypassAll', kSendPort: 'sendPort', kSendLevel: 'sendlevel', kSendMute: 'sendMute',
+};
 
 // Load BridgeCore.js alone. Returns the context, so tests can reach its
 // top-level classes and functions by name.
@@ -184,7 +209,10 @@ export function loadComponent({ host, config, mixer }) {
   const params = [];
   const hostComponent = {
     model: mixer ? mixer.model : undefined,
-    paramList: { addParam: (name) => (params.push({ name }), params[params.length - 1]) },
+    paramList: {
+      addParam: (name) => (params.push({ name }), params[params.length - 1]),
+      addAlias: (name) => ({ name, string: '' }),
+    },
   };
   const component = vm.runInContext('createBridgeComponent()', ctx);
   component.onInit(hostComponent);
