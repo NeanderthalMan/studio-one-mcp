@@ -41,6 +41,23 @@ test('takes: list, next, previous; selection is restored', () => {
   assert.match(ask('takes', { track: 'Vox', action: 'shuffle' }).error, /action must be one of/);
 });
 
+test('takes goto: walks to take 1, then forward; validates the number', () => {
+  const { ask } = setup({
+    tracks: [
+      { name: 'Gtr', takeEvents: [[{ name: 'T1', start: 0, end: 4 }], [{ name: 'T2', start: 0, end: 4 }], [{ name: 'T3', start: 0, end: 4 }]] },
+      { name: 'Bass', events: [{ name: 'Bass', start: 2, end: 6 }] },
+    ],
+  });
+  ask('selectTrack', { name: 'Bass' });
+  for (const [take, name] of [[3, 'T3'], [1, 'T1'], [2, 'T2'], [2, 'T2']]) {
+    const r = plain(ask('takes', { track: 'Gtr', action: 'goto', take }).result);
+    assert.deepEqual([r.active, r.activeEvents], [take, [name]], `goto ${take}`);
+  }
+  assert.deepEqual(plain(ask('song').result).selectedTracks, ['Bass'], 'selection put back');
+  assert.match(ask('takes', { track: 'Gtr', action: 'goto', take: 4 }).error, /take must be 1 to 3/);
+  assert.match(ask('takes', { track: 'Gtr', action: 'goto' }).error, /take must be/);
+});
+
 test('save and save new version', () => {
   const { ask, doc } = song();
   assert.deepEqual(plain(ask('save', {}).result), { executed: true });

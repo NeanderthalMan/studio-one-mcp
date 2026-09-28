@@ -63,8 +63,9 @@ export function setup({ tracks, noSong = false, markers = [0, 300] } = {}) {
     obj[key] = value;
     return { undo: () => (obj[key] = old), redo: () => (obj[key] = value) };
   };
+  // Layers do not wrap on 5.5.2: next on the last take (previous on the first) stays put.
   const layerCmd = (name, step) => undoable('Track', name,
-    () => { const t = sel(); return setter(t, 'activeTake', (t.activeTake + step + t.layers.count) % t.layers.count); },
+    () => { const t = sel(); return setter(t, 'activeTake', Math.max(0, Math.min(t.layers.count - 1, t.activeTake + step))); },
     () => !!sel() && sel().layers.count > 1);
   layerCmd('Activate Next Layer', 1);
   layerCmd('Activate Previous Layer', -1);

@@ -268,9 +268,24 @@ server.tool(
 
 server.tool(
   'live_takes',
-  "A track's takes (layers) in the running Studio One: list them, switch to the next/previous take, or unpack all takes to separate tracks. Returns the number of takes and the names of the clips now playing. Takes do not wrap: next on the last take (or previous on the first) changes nothing.",
-  { track: z.string(), action: z.enum(['list', 'next', 'previous', 'unpack']).optional() },
-  guard((a) => call('takes', a)),
+  "A track's takes (layers) in the running Studio One: list them (with their names from the last save), switch to the next/previous take or to take N (goto, 1-based), add an empty take or duplicate the active one (each one live_undo), unpack all takes to separate tracks, or recall a retrospective recording (instrument tracks: what you played while not recording). Returns the number of takes and the names of the clips now playing. Takes do not wrap: next on the last take (or previous on the first) changes nothing.",
+  {
+    track: z.string(),
+    action: z.enum(['list', 'next', 'previous', 'goto', 'add', 'duplicate', 'unpack', 'retrospective']).optional(),
+    take: z.number().int().optional().describe('For goto: 1-based take number'),
+  },
+  guard(async (a) => {
+    const r = await call('takes', a);
+    if ((a.action || 'list') !== 'list') return r;
+    try {
+      const { fileUrl } = await call('song');
+      const saved = fileUrl && existsSync(fileURLToPath(fileUrl)) ? readSong(fileURLToPath(fileUrl)).tracks.find((t) => t.name === a.track) : null;
+      if (saved?.layers) r.saved = { takes: saved.layers.map((l) => l.name), active: saved.layers.findIndex((l) => l.active) + 1 };
+    } catch {
+      // names are a bonus; the live answer stands without them
+    }
+    return r;
+  }),
 );
 
 server.tool(

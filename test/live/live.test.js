@@ -273,6 +273,34 @@ test('takes: next then previous restores the active take', async (t) => {
   }
 });
 
+test('takes goto: every take by number, then back to the one that was active', async (t) => {
+  const track = await uniqueNamed((x) => x.takes > 1);
+  if (!track) return t.skip('no track with more than one take');
+  const start = (await call('takes', { track: track.name })).activeEvents.join();
+  const seen = [];
+  for (let n = 1; n <= track.takes; n++) seen.push((await call('takes', { track: track.name, action: 'goto', take: n })).activeEvents.join());
+  const back = seen.indexOf(start) + 1;
+  assert.ok(back > 0, `the starting take is one of the ${track.takes}`);
+  assert.equal((await call('takes', { track: track.name, action: 'goto', take: back })).activeEvents.join(), start);
+});
+
+test('takes add and duplicate: one more take each, one undo each, active take kept', async (t) => {
+  const track = await uniqueNamed((x) => x.takes > 1);
+  if (!track) return t.skip('no track with more than one take');
+  const before = await call('takes', { track: track.name });
+  for (const action of ['add', 'duplicate']) {
+    const r = await call('takes', { track: track.name, action });
+    try {
+      assert.equal(r.takes, before.takes + 1, `${action}: one more take`);
+    } finally {
+      await call('undo', {});
+    }
+    const after = await call('takes', { track: track.name });
+    assert.deepEqual([after.takes, after.activeEvents], [before.takes, before.activeEvents], `${action} undone`);
+  }
+  for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+});
+
 // Mute is not on Studio One's undo stack: an undo here reverts the edit before it (it
 // once flipped the take the test above had just restored). Toggle back instead.
 test('trackState mute toggles the channel, and toggling again restores it', async () => {
