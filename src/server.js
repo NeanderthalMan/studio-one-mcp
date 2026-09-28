@@ -87,7 +87,7 @@ server.tool(
 
 server.tool(
   'live_channels',
-  'List the mixer channels of the song open in Studio One right now, with live volume, pan, mute, solo and record-arm.',
+  'List the mixer channels of the song open in Studio One right now, with live volume, pan, mute, solo, record-arm and automation mode.',
   {},
   guard(() => call('channels')),
 );
@@ -101,6 +101,13 @@ server.tool(
     value: z.number(),
   },
   guard((a) => call('setChannel', a)),
+);
+
+server.tool(
+  'live_set_automation',
+  "Set a mixer channel's automation mode in the running Studio One: off, read, touch, latch or write (live_channels shows each channel's mode). Touch, latch and write record fader and plug-in moves as automation while the song plays. Returns before/after.",
+  { channel: z.string(), mode: z.enum(['off', 'read', 'touch', 'latch', 'write']) },
+  guard((a) => call('setAutomation', a)),
 );
 
 server.tool(

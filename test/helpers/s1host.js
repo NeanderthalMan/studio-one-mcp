@@ -173,7 +173,7 @@ export function fakeMixer(channels) {
     return { getElement: (i) => els[i] || null, els };
   };
   const elements = channels.map((c) => {
-    const params = { label: c.label, volume: c.volume ?? 1, pan: c.pan ?? 0.5, mute: c.mute ?? 0, solo: c.solo ?? 0, recordArmed: c.recordArmed ?? 0, 'Inserts/bypassAll': 0 };
+    const params = { label: c.label, volume: c.volume ?? 1, pan: c.pan ?? 0.5, mute: c.mute ?? 0, solo: c.solo ?? 0, recordArmed: c.recordArmed ?? 0, automationMode: c.automationMode ?? 0, 'Inserts/bypassAll': 0 };
     (c.inserts || []).forEach((x, i) => (params[`Inserts/[${i}]/@bypass`] = x.bypassed ? 1 : 0));
     const banks = {
       inserts: bankOf(c.inserts || [], (x) => ({ '@owner/deviceName': x.name })),
@@ -197,7 +197,7 @@ export function fakeMixer(channels) {
 }
 
 const ParamID = {
-  kLabel: 'label', kVolume: 'volume', kPan: 'pan', kRecord: 'recordArmed', kChannelType: 'channelType',
+  kLabel: 'label', kVolume: 'volume', kPan: 'pan', kRecord: 'recordArmed', kChannelType: 'channelType', kAutoMode: 'automationMode',
   kInsertName: '@owner/deviceName', kInsertBypass: 'Inserts/bypassAll', kSendPort: 'sendPort', kSendLevel: 'sendlevel', kSendMute: 'sendMute',
 };
 

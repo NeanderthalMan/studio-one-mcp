@@ -5,6 +5,8 @@ include_file("resource://com.presonus.musicdevices/sdk/controlsurfacecomponent.j
 include_file("BridgeConfig.js");
 include_file("BridgeCore.js");
 
+const AUTOMATION_MODES = ["off", "read", "touch", "latch", "write"];
+
 class BridgeComponent extends PreSonus.ControlSurfaceComponent {
     onInit(hostComponent) {
         super.onInit(hostComponent);
@@ -78,7 +80,21 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
             mute: this.readParam(c.el, "mute"),
             solo: this.readParam(c.el, "solo"),
             recordArmed: this.readParam(c.el, PreSonus.ParamID.kRecord),
+            automation: AUTOMATION_MODES[this.readParam(c.el, PreSonus.ParamID.kAutoMode)] || null,
         }));
+    }
+
+    // Automation mode is a list parameter on the channel: 0 Off .. 4 Write
+    // (checked against its display text on 5.5.2).
+    setAutomation(args) {
+        const mode = AUTOMATION_MODES.indexOf(args.mode);
+        if (mode < 0) return { error: "mode must be one of " + AUTOMATION_MODES.join(", ") };
+        const c = this.channelByLabel(args.channel);
+        if (c.error) return c;
+        const id = PreSonus.ParamID.kAutoMode;
+        const before = AUTOMATION_MODES[this.readParam(c.el, id)] || null;
+        c.el.setParamValue(id, mode);
+        return { channel: args.channel, before: before, after: AUTOMATION_MODES[this.readParam(c.el, id)] || null };
     }
 
     // Peak meter per channel in dB (-144 is silence), both sides of a stereo strip.
