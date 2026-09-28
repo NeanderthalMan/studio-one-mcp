@@ -64,7 +64,9 @@ test('no host APIs that are missing or crash on Studio One 5', () => {
   }
 });
 
-test('component methods never throw (Studio One turns that into an error dialog)', () => {
-  const code = read('BridgeComponent.js').replace(/\/\/.*$/gm, '');
-  assert.doesNotMatch(code, /\bthrow\b/);
+test('device scripts never throw (Studio One turns that into an error dialog)', () => {
+  for (const f of ['BridgeCore.js', 'BridgeComponent.js', 'BridgeDevice.js']) {
+    const code = read(f).replace(/\/\/.*$/gm, '');
+    assert.doesNotMatch(code, /\bthrow\b/, f);
+  }
 });
