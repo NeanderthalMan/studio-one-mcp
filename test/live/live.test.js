@@ -6,7 +6,7 @@
 // They touch the open song only reversibly: one channel's mute/solo/volume are
 // changed and restored, and View/Console is toggled twice. Pick the channel with
 // S1_TEST_CHANNEL (default: the first channel that is neither muted nor soloed).
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { bridgeStatus, call } from '../../src/bridge.js';
 import { pluginParamNames } from '../../src/plugins.js';
@@ -22,16 +22,26 @@ import { snapshot } from '../../src/snapshots.js';
 
 let channels;
 let testChannel;
+let selection0;
 
 before(async () => {
   const s = bridgeStatus();
   assert.ok(s.loaded, `bridge not loaded: ${s.reason}`);
   await call('ping', {}, { timeoutMs: 3000 });
+  selection0 = (await call('song')).selectedTracks;
   channels = await call('channels');
   testChannel = process.env.S1_TEST_CHANNEL
     ? channels.find((c) => c.label === process.env.S1_TEST_CHANNEL)
     : channels.find((c) => !c.mute && !c.solo);
   assert.ok(testChannel, 'a channel to test with');
+});
+
+// The track selection is part of what a run must leave as it found it (an undo
+// can re-select the track its edit was on). Put it back, then say if it moved.
+after(async () => {
+  const now = (await call('song')).selectedTracks;
+  for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  assert.deepEqual(now, selection0, 'a test left the track selection changed (restored now)');
 });
 
 test('ping round trip is fast and carries the live session', async () => {
@@ -282,11 +292,14 @@ test('editEvents split, then undo restores the events', async (t) => {
   const track = await uniqueNamed((x) => x.events.some((e) => e.end - e.start > 2));
   if (!track) return t.skip('no track with an event longer than 2 s');
   const ev = track.events.find((e) => e.end - e.start > 2);
+  const sel0 = (await call('song')).selectedTracks;
   const r = await call('editEvents', { track: track.name, action: 'split', at: ev.start + 1 });
   try {
     assert.equal(r.events.length, track.events.length + 1, 'one more event after the split');
   } finally {
     await call('undo', {});
+    // The undo re-selects the split track; put the selection back.
+    for (const [i, name] of sel0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
   assert.equal((await call('tracks', { name: track.name })).find((x) => x.name === track.name).eventCount, track.eventCount);
 });
