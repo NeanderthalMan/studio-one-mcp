@@ -15,6 +15,7 @@ import { listSongs, resolveSong, songFolder } from './library.js';
 import { bridgeStatus, call } from './bridge.js';
 import { midiPort } from './midi.js';
 import { pluginParamNames } from './plugins.js';
+import { arranger, listMacros, runMacro } from './arranger.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -418,6 +419,39 @@ server.tool(
   'List Studio One commands available to live_command (about 1,000 on Studio One 5), optionally filtered by a substring. with_state adds whether each is enabled right now; many need a selection or an open editor.',
   { filter: z.string().optional(), with_state: z.boolean().optional() },
   guard(({ filter, with_state }) => call('listCommands', { filter, withState: !!with_state }, { timeoutMs: 15000 })),
+);
+
+// Sections of the open song as of its last save (the arranger track is not scriptable live).
+async function savedSections() {
+  const { fileUrl } = await call('song');
+  const path = fileUrl ? fileURLToPath(fileUrl) : null;
+  const sections = path && existsSync(path) ? readSong(path).sections : [];
+  return () => sections;
+}
+
+server.tool(
+  'live_arranger',
+  "Arranger sections in the running Studio One. sections: list them (numbered in song order, from the last save). goto: a section by number or name; while playing it jumps at the arranger's sync point, while stopped it moves the playhead to the section's start. next / previous: step while playing. syncMode: when jumps happen (off, 1bar, 2bars, 4bars, end of section). createFromMarkers: make sections between markers (undo with live_undo). The loop range is kept.",
+  {
+    action: z.enum(['sections', 'goto', 'next', 'previous', 'syncMode', 'createFromMarkers']),
+    section: z.union([z.number().int(), z.string()]).optional().describe('For goto: section number (1-16) or name'),
+    sync: z.enum(['off', '1bar', '2bars', '4bars', 'end']).optional().describe('For syncMode'),
+  },
+  guard(async (a) => arranger(call, await savedSections(), a)),
+);
+
+server.tool(
+  'live_macros',
+  "List the macros in the running Studio One (Macros panel: built-in and your own) by title, optionally filtered; with_state adds whether each can run right now (most act on the selection).",
+  { filter: z.string().optional(), with_state: z.boolean().optional() },
+  guard(({ filter, with_state }) => listMacros(call, { filter, withState: with_state })),
+);
+
+server.tool(
+  'live_run_macro',
+  'Run a Studio One macro by title (from live_macros), e.g. "Normalize Audio & Set Peaks To -12". Macros are chains of commands that usually act on the selected events or tracks (see live_select_events / live_select_track) and can edit the song; most edits undo with live_undo. check_only reports whether it is enabled without running it.',
+  { title: z.string(), check_only: z.boolean().optional() },
+  guard(({ title, check_only }) => runMacro(call, { title, checkOnly: check_only })),
 );
 
 server.tool(
