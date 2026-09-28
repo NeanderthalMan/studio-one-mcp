@@ -62,12 +62,12 @@ npx studio-one-mcp setup
 5. It shows the one step you do in Studio One: **Preferences… (⌘,)** on a Mac, **Options** on Windows → **External Devices → Add… → studio-one-mcp → MCP Bridge**. Set **Receive From** to your virtual MIDI port, and **Send To** to None. Restart Studio One first if it was running.
 6. It waits for Studio One to answer.
 
-Use `--yes` to accept the defaults, `--dry-run` to see what it would do, and `--profile <dir>` to pick a profile.
+`npm run setup` does the same thing. Use `--yes` to accept the defaults, `--dry-run` to see what it would do, and `--profile <dir>` to pick a profile.
 
 If something doesn't work, run:
 
 ```sh
-npx studio-one-mcp doctor
+npx studio-one-mcp doctor      # or: npm run doctor
 ```
 
 It checks every link in the chain and tells you how to fix the first broken one: Node, profile, Songs folder, device installed and current, MIDI port, Studio One running, bridge loaded, bridge answering, and MCP client registration.
