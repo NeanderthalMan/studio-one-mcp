@@ -33,6 +33,11 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
     loopEnd: param('loopEnd', 16, { display: bars }),
   };
   const transportPanel = { findParameter: (n) => params[n] || null };
+  // Environment/Metronome as on 5.5.2: clickOn/precount/preroll 0..1, bars 1..16.
+  const metro = {
+    clickOn: param('clickOn', 1), precount: param('precount', 0), preroll: param('preroll', 0), bars: param('bars', 1, { min: 1, max: 16 }),
+  };
+  const metronome = { params: metro, findParameter: (n) => metro[n] || null };
   // takeEvents: one events array per take; `events` is shorthand for a single take.
   const makeTrack = (t, i) => {
     const takes = (t.takeEvents || [t.events || []]).map((list) => list.map((e) => ({ ...e })));
@@ -79,6 +84,7 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
     urls: {
       '://studioapp/DocumentManager': { activeDocument: { title, path: { url: `file:///songs/${title}/${title}.song` } } },
       '://hostapp/DocumentManager/ActiveDocument/Environment/TransportPanel': transportPanel,
+      '://hostapp/DocumentManager/ActiveDocument/Environment/Metronome': metronome,
       '://hostapp/DocumentManager/ActiveDocument/TrackList': { mainTrackList },
     },
   };

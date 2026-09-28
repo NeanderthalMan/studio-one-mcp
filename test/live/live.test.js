@@ -466,6 +466,19 @@ test('track edit: rename, colour and remove a scratch track; selection kept', as
   assert.deepEqual((await call('song')).selectedTracks, song0.selectedTracks);
 });
 
+// Record modes are not exercised: they cannot be read, so they could not be restored.
+test('metronome: flip click and precount length, restore both', async () => {
+  const m0 = await call('metronome', {});
+  assert.equal(typeof m0.click, 'boolean');
+  assert.ok(m0.precountBars >= 1 && m0.precountBars <= 16);
+  const bars = m0.precountBars === 2 ? 1 : 2;
+  try {
+    assert.deepEqual(await call('metronome', { click: !m0.click, precountBars: bars }), { ...m0, click: !m0.click, precountBars: bars });
+  } finally {
+    assert.deepEqual(await call('metronome', { click: m0.click, precountBars: m0.precountBars }), m0);
+  }
+});
+
 test('sends: set a level and restore it', async (t) => {
   const withSend = (await call('sends', {})).find((c) => c.sends.length);
   if (!withSend) return t.skip('no channel has a send');

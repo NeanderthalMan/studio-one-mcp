@@ -18,6 +18,7 @@ import { pluginParamNames } from './plugins.js';
 import { arranger, listMacros, runMacro } from './arranger.js';
 import { tempo } from './tempo.js';
 import { trackEdit } from './tracks.js';
+import { recordSetup } from './record.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -447,6 +448,24 @@ server.tool(
     bpm: z.number().optional(),
   },
   guard((a) => tempo(call, a)),
+);
+
+server.tool(
+  'live_record_setup',
+  'Recording setup in the running Studio One. With no arguments, reads the metronome: click, precount, precount length in bars, preroll. Set any of those, and/or record modes: replace, loopTakes or loopMix, takesToLayers, inputQuantize, noteErase (true/false). Record modes cannot be read back from Studio One, so they are reported as set, not confirmed.',
+  {
+    click: z.boolean().optional(),
+    precount: z.boolean().optional(),
+    precountBars: z.number().int().optional().describe('1-16'),
+    preroll: z.boolean().optional(),
+    replace: z.boolean().optional(),
+    loopTakes: z.boolean().optional(),
+    loopMix: z.boolean().optional(),
+    takesToLayers: z.boolean().optional(),
+    inputQuantize: z.boolean().optional(),
+    noteErase: z.boolean().optional(),
+  },
+  guard((a) => recordSetup(call, a)),
 );
 
 server.tool(

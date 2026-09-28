@@ -140,6 +140,7 @@ class Bridge {
             case "tracks": return this.tracks(args);
             case "selectTrack": return this.selectTrack(args);
             case "notes": return this.notes(args);
+            case "metronome": return this.metronome(args);
             case "transport": return this.transport(args);
             case "setTransport": return this.setTransport(args);
             case "markers": return this.markers();
@@ -271,6 +272,28 @@ class Bridge {
                 entry.events = events.slice(0, maxEvents);
             }
             out.push(entry);
+        }
+        return out;
+    }
+
+    // Metronome settings: the document's Environment/Metronome parameters
+    // (clickOn, precount, preroll, bars = precount length 1..16), read and set.
+    metronome(args) {
+        const m = docObject("Environment/Metronome");
+        if (!m || !has(m, "findParameter", "function")) return fail("metronome not available (no song open?)");
+        const fields = { click: "clickOn", precount: "precount", preroll: "preroll", precountBars: "bars" };
+        for (const key in fields) {
+            if (args[key] === undefined) continue;
+            const p = m.findParameter(fields[key]);
+            if (!p || !has(p, "setValue", "function")) return fail(key + " not available");
+            const v = typeof args[key] === "boolean" ? (args[key] ? 1 : 0) : args[key];
+            if (typeof v !== "number" || v < p.min || v > p.max) return fail(key + " must be from " + p.min + " to " + p.max);
+            p.setValue(v, true);
+        }
+        const out = {};
+        for (const key in fields) {
+            const p = m.findParameter(fields[key]);
+            out[key] = p ? (key === "precountBars" ? p.value : !!p.value) : null;
         }
         return out;
     }

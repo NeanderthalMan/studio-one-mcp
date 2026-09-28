@@ -136,6 +136,13 @@ test('selectEvents: by track(s), all, none; enables event commands', () => {
   assert.match(ask('selectEvents', {}).error, /required/);
 });
 
+test('metronome: read, set booleans and precount bars, validate range', () => {
+  const { ask } = setup();
+  assert.deepEqual(plain(ask('metronome', {}).result), { click: true, precount: false, preroll: false, precountBars: 1 });
+  assert.deepEqual(plain(ask('metronome', { click: false, precount: true, precountBars: 2 }).result), { click: false, precount: true, preroll: false, precountBars: 2 });
+  assert.match(ask('metronome', { precountBars: 17 }).error, /precountBars must be from 1 to 16/);
+});
+
 test('notes: per part, pitch / velocity 0-127 / times / beats; audio events skipped; capped', () => {
   const { ask } = setup({
     tracks: [

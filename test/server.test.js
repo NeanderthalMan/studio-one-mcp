@@ -54,7 +54,7 @@ test('exposes the song and live tools', async () => {
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
     'live_add_marker', 'live_add_track', 'live_arranger', 'live_bypass_insert', 'live_channels', 'live_command', 'live_delete_marker',
-    'live_edit_events', 'live_eval', 'live_inserts', 'live_list_commands', 'live_macros', 'live_markers', 'live_meters', 'live_notes', 'live_plugin_params', 'live_record',
+    'live_edit_events', 'live_eval', 'live_inserts', 'live_list_commands', 'live_macros', 'live_markers', 'live_meters', 'live_notes', 'live_plugin_params', 'live_record', 'live_record_setup',
     'live_redo', 'live_run_macro', 'live_save', 'live_select_events', 'live_select_track', 'live_sends', 'live_set_automation',
     'live_set_channel', 'live_set_loop', 'live_set_plugin_param', 'live_set_send', 'live_set_transport', 'live_song', 'live_status', 'live_takes', 'live_tempo', 'live_track_edit', 'live_track_state',
     'live_tracks', 'live_transport', 'live_undo',
