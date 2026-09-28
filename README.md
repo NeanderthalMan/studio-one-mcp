@@ -23,10 +23,17 @@ Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Window
 | `live_tracks` | Tracks with media type, colour, mixer channel, number of takes, selection, and events (name, start, end, length in seconds, muted). |
 | `live_select_track` | Select a track by name, so that selection-based commands act on it. |
 | `live_transport` | Press a transport button: play, stop, record, return to zero, rewind or forward a bar, go to the loop start or end, toggle loop, click, precount or preroll. |
-| `live_set_transport` | Set the tempo, playhead position (seconds), and loop, precount or preroll on or off. |
+| `live_set_transport` | Set the tempo, the playhead position (in seconds, or bars like `"9.1.1.0"`), and loop, precount or preroll on or off. |
 | `live_markers` | Markers with number, position (seconds and bars) and name (from the last save). Reading them briefly moves the playhead and puts it back, so it refuses while playing. Studio One only has recall commands for markers 1 to 20. |
 | `live_add_marker` / `live_delete_marker` | Add a marker at a position, or delete one by number or position. The playhead is left where it was. |
 | `live_select_events` | Select every event on some tracks or on all of them, or clear the selection. Selection-based commands then act on those events, e.g. `Event/Mute Events`, `Edit/Split at Cursor`, `Event/Quantize`, `Track/Activate Next Layer` (switch takes), `Edit/Undo`. |
+| `live_set_loop` | Set the loop range in seconds or bars (e.g. `"9.1.1.0"` to `"17.1.1.0"`), and turn looping on or off. |
+| `live_takes` | A track's takes: list them, switch to the next or previous take, or unpack them to separate tracks. |
+| `live_track_state` | Arm, monitor, mute, solo, hide or duplicate a track by name, or show all tracks. |
+| `live_edit_events` | Clip edits on one track: mute or unmute, quantize, transpose, split or trim at a time, merge, delete. |
+| `live_add_track` | Add an audio (mono or stereo), instrument, folder or automation track. |
+| `live_meters` | Peak dB for every channel. With `duration_ms`, it samples during playback and reports the highest peak and any clipping. |
+| `live_save`, `live_undo`, `live_redo` | Save (optionally as a new version), and undo or redo edits, with a step count. |
 | `live_channels` | Live mixer: volume, pan, mute, solo and record-arm for each channel. |
 | `live_set_channel` | Set volume, pan, mute, solo or record-arm on a channel. |
 | `live_command` | Run any of the roughly 1,000 Studio One commands, e.g. `Transport/Start`, `Edit/Undo`, `File/Save` or `View/Console`. `check_only` reports whether one is enabled without running it. |
@@ -35,28 +42,39 @@ Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Window
 
 ## Install
 
+You need Node.js 20 or newer and Studio One.
+
 ```sh
+git clone https://github.com/NeanderthalMan/studio-one-mcp.git
+cd studio-one-mcp
 npm install
-npm test
+npx studio-one-mcp setup
 ```
 
-Register the server with your MCP client. For Claude Code, the repo's `.mcp.json` already does this. Other clients use:
+`setup` walks you through each step and asks before changing anything:
 
-```json
-{ "mcpServers": { "studio-one": { "command": "node", "args": ["/path/to/studio-one-mcp/src/server.js"] } } }
-```
+1. It finds your Studio One user profile.
+2. It installs the **MCP Bridge** device into it.
+3. It checks for a virtual MIDI port, which acts as the bridge's doorbell:
+   - **macOS:** the built-in IAC Driver. `setup` can open Audio MIDI Setup for you. Tick **Device is online** under **IAC Driver**.
+   - **Windows:** install [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html) and add a port named `studio-one-mcp`.
+4. It registers the server with Claude Code (all projects) and, if you want, Claude Desktop. It backs up the Desktop config before editing it. For any other client, it prints the JSON to paste.
+5. It shows the one step you do in Studio One: **Preferences… (⌘,)** on a Mac, **Options** on Windows → **External Devices → Add… → studio-one-mcp → MCP Bridge**. Set **Receive From** to your virtual MIDI port, and **Send To** to None. Restart Studio One first if it was running.
+6. It waits for Studio One to answer.
 
-### Live bridge (optional)
+Use `--yes` to accept the defaults, `--dry-run` to see what it would do, and `--profile <dir>` to pick a profile.
+
+If something doesn't work, run:
 
 ```sh
-npm run install-device            # add -- --allow-eval to enable live_eval
+npx studio-one-mcp doctor
 ```
 
-One-time MIDI setup (macOS): open **Audio MIDI Setup → Window → Show MIDI Studio → IAC Driver**, and tick **Device is online**.
+It checks every link in the chain and tells you how to fix the first broken one: Node, profile, Songs folder, device installed and current, MIDI port, Studio One running, bridge loaded, bridge answering, and MCP client registration.
 
-Then restart Studio One and add the device once: **Studio One → Preferences… (⌘,) → External Devices → Add… → studio-one-mcp → MCP Bridge** (on Windows it is Studio One → Options). Set its **Receive From** to **IAC Driver Bus 1**, and leave Send To empty. `live_status` should now report `connected: true`.
+To remove the device: `npx studio-one-mcp uninstall`, then remove **MCP Bridge** under External Devices.
 
-To remove it: `node scripts/install-device.js --uninstall`, then remove the device in External Devices.
+**Without the live bridge:** the `song_*` tools need nothing but the MCP registration. They read your `.song` files directly.
 
 ### Configuration
 
@@ -92,7 +110,7 @@ npm test            # unit and end-to-end tests; no Studio One needed
 npm run test:live   # against a running Studio One with the bridge installed
 ```
 
-The unit tests run the real device scripts under `node:vm` against a fake Studio One host (`test/helpers/s1host.js`). The live tests change only what they restore: one channel's mute, solo and volume, the tempo, the playhead, loop, the track selection, and a play/stop. They never record. They also add a marker at 3.25 s and delete it again, and mute a track's events and unmute them.
+The unit tests run the real device scripts under `node:vm` against a fake Studio One host (`test/helpers/s1host.js`). The live tests change only what they restore: one channel's mute, solo and volume, the tempo, the playhead, loop, the track selection, and a play/stop. They never record. They also add a marker at 3.25 s and delete it again, mute a track's events and unmute them, switch takes and back, and split a clip, mute a track and add a track, each followed by Undo. File/Save is only checked, never run.
 
 Security: anything that can write to the mailbox folder, which means anything running as your user, can drive Studio One through it. With `--allow-eval`, it can also run arbitrary script inside Studio One. Keep the folder local, and leave eval off unless you are exploring.
 
