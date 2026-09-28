@@ -78,7 +78,10 @@ test('command check-only does not run it; unknown commands are errors', async ()
   await assert.rejects(call('command', { category: 'View', name: 'Mixer' }), /unknown command/);
 });
 
-test('command executes: View/Console toggled twice leaves the window as it was', async () => {
+test('command executes: View/Console toggled twice leaves the window as it was', async (t) => {
+  // Console is only enabled on the Song page (not the Start page).
+  const { enabled } = await call('command', { category: 'View', name: 'Console', checkOnly: true });
+  if (!enabled) return t.skip('View/Console is disabled right now; switch Studio One to the Song page');
   assert.deepEqual(await call('command', { category: 'View', name: 'Console' }), { executed: true });
   await new Promise((r) => setTimeout(r, 300));
   assert.deepEqual(await call('command', { category: 'View', name: 'Console' }), { executed: true });
