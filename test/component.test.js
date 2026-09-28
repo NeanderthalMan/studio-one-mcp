@@ -66,6 +66,15 @@ test('channels: live values from the mixer bank', () => {
   ]);
 });
 
+test('automation: mode per channel by name; setAutomation validates and reports before/after', () => {
+  const { ring, mixer } = setup({ channels: [{ label: 'A', automationMode: 1 }, { label: 'B' }] });
+  assert.deepEqual(plain(ring('channels').result).map((c) => [c.label, c.automation]), [['A', 'read'], ['B', 'off']]);
+  assert.deepEqual(plain(ring('setAutomation', { channel: 'B', mode: 'touch' }).result), { channel: 'B', before: 'off', after: 'touch' });
+  assert.equal(mixer.elements[1].params.automationMode, 2);
+  assert.match(ring('setAutomation', { channel: 'B', mode: 'loud' }).error, /mode must be one of off, read/);
+  assert.match(ring('setAutomation', { channel: 'Z', mode: 'off' }).error, /no channel named Z/);
+});
+
 test('channels: unlabeled and disconnected strips are skipped', () => {
   const { ring, mixer } = setup({ channels: [{ label: 'A' }, { label: '' }, { label: 'C' }] });
   mixer.elements[2].isConnected = () => false;

@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 import { listSongs, resolveSong, songFolder } from './library.js';
 import { bridgeStatus, call } from './bridge.js';
 import { midiPort } from './midi.js';
+import { pluginParamNames } from './plugins.js';
+import { arranger, listMacros, runMacro } from './arranger.js';
+import { tempo } from './tempo.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -86,7 +89,7 @@ server.tool(
 
 server.tool(
   'live_channels',
-  'List the mixer channels of the song open in Studio One right now, with live volume, pan, mute, solo and record-arm.',
+  'List the mixer channels of the song open in Studio One right now, with live volume, pan, mute, solo, record-arm and automation mode.',
   {},
   guard(() => call('channels')),
 );
@@ -100,6 +103,13 @@ server.tool(
     value: z.number(),
   },
   guard((a) => call('setChannel', a)),
+);
+
+server.tool(
+  'live_set_automation',
+  "Set a mixer channel's automation mode in the running Studio One: off, read, touch, latch or write (live_channels shows each channel's mode). Touch, latch and write record fader and plug-in moves as automation while the song plays. Returns before/after.",
+  { channel: z.string(), mode: z.enum(['off', 'read', 'touch', 'latch', 'write']) },
+  guard((a) => call('setAutomation', a)),
 );
 
 server.tool(
@@ -313,6 +323,48 @@ server.tool(
   guard((a) => call('setSend', a)),
 );
 
+server.tool(
+  'live_plugin_params',
+  "Parameters of one plug-in on a channel in the running Studio One (slot from live_inserts): name, value, display text (e.g. \"2.0:1\", \"-12.0 dB\"), range and normalised value. Studio One cannot list a plug-in's parameters, so names come from its presets and Studio One's remote-control map; this works for PreSonus plug-ins. For others, pass the names in `params`.",
+  {
+    channel: z.string(),
+    slot: z.number().int(),
+    filter: z.string().optional().describe('Only parameters whose name contains this (e.g. "comp", "freq")'),
+    params: z.array(z.string()).optional().describe('Exact parameter names to read instead of the discovered ones'),
+  },
+  guard(async ({ channel, slot, filter, params }) => {
+    const rack = (await call('inserts', { channel }))[0];
+    const plug = rack && rack.inserts.find((i) => i.slot === slot);
+    if (!plug) throw new Error(`no plug-in in slot ${slot} on ${channel}`);
+    const known = params?.length ? { names: params, sources: ['params'] } : pluginParamNames(plug.name);
+    const want = filter ? known.names.filter((n) => n.toLowerCase().includes(filter.toLowerCase())) : known.names;
+    if (!want.length) {
+      return { channel, slot, plugin: plug.name, params: [], note: known.names.length ? `no parameter name contains "${filter}"` : `no parameter names known for ${plug.name}; pass them in params` };
+    }
+    const r = await call('pluginParams', { channel, slot, names: want });
+    // Discovered names the plug-in does not answer to are noise (other versions, UI state); given ones are not.
+    return params?.length ? r : { channel: r.channel, slot: r.slot, plugin: r.plugin, params: r.params };
+  }),
+);
+
+server.tool(
+  'live_set_plugin_param',
+  'Set one plug-in parameter on a channel in the running Studio One (names from live_plugin_params). Give exactly one of: text, as Studio One displays it (e.g. "4.0:1", "-12 dB", "Standard"); normalized, 0..1; or value, the raw value within its min..max. Returns before/after; to revert, set the "before" value.',
+  {
+    channel: z.string(),
+    slot: z.number().int(),
+    param: z.string(),
+    text: z.string().optional(),
+    normalized: z.number().optional(),
+    value: z.number().optional(),
+  },
+  guard((a) => {
+    const given = ['text', 'normalized', 'value'].filter((k) => a[k] !== undefined);
+    if (given.length !== 1) throw new Error('give exactly one of text, normalized or value');
+    return call('setPluginParam', a);
+  }),
+);
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 server.tool(
@@ -368,6 +420,50 @@ server.tool(
   'List Studio One commands available to live_command (about 1,000 on Studio One 5), optionally filtered by a substring. with_state adds whether each is enabled right now; many need a selection or an open editor.',
   { filter: z.string().optional(), with_state: z.boolean().optional() },
   guard(({ filter, with_state }) => call('listCommands', { filter, withState: !!with_state }, { timeoutMs: 15000 })),
+);
+
+server.tool(
+  'live_tempo',
+  "Tempo map of the running Studio One (stopped). at: tempo at one or more positions. set: change the tempo of the segment containing a position (default: the playhead). insert: add a tempo change at a position with its bpm (two undo steps: live_undo steps 2 removes it). Positions are seconds or bars like \"9.1.1.0\"; the playhead is put back. For the whole saved map, and time signatures, use song_read.",
+  {
+    action: z.enum(['at', 'set', 'insert']),
+    at: z.union([TIME, z.array(TIME)]).optional(),
+    bpm: z.number().optional(),
+  },
+  guard((a) => tempo(call, a)),
+);
+
+// Sections of the open song as of its last save (the arranger track is not scriptable live).
+async function savedSections() {
+  const { fileUrl } = await call('song');
+  const path = fileUrl ? fileURLToPath(fileUrl) : null;
+  const sections = path && existsSync(path) ? readSong(path).sections : [];
+  return () => sections;
+}
+
+server.tool(
+  'live_arranger',
+  "Arranger sections in the running Studio One. sections: list them (numbered in song order, from the last save). goto: a section by number or name; while playing it jumps at the arranger's sync point, while stopped it moves the playhead to the section's start. next / previous: step while playing. syncMode: when jumps happen (off = immediately, 1bar, 2bars, 4bars, end of section). createFromMarkers: make sections between markers (undo with live_undo). The loop range is kept.",
+  {
+    action: z.enum(['sections', 'goto', 'next', 'previous', 'syncMode', 'createFromMarkers']),
+    section: z.union([z.number().int(), z.string()]).optional().describe('For goto: section number (1-16) or name'),
+    sync: z.enum(['off', '1bar', '2bars', '4bars', 'end']).optional().describe('For syncMode'),
+  },
+  guard(async (a) => arranger(call, await savedSections(), a)),
+);
+
+server.tool(
+  'live_macros',
+  "List the macros in the running Studio One (Macros panel: built-in and your own) by title, optionally filtered; with_state adds whether each can run right now (most act on the selection).",
+  { filter: z.string().optional(), with_state: z.boolean().optional() },
+  guard(({ filter, with_state }) => listMacros(call, { filter, withState: with_state })),
+);
+
+server.tool(
+  'live_run_macro',
+  'Run a Studio One macro by title (from live_macros), e.g. "Normalize Audio & Set Peaks To -12". Macros are chains of commands that usually act on the selected events or tracks (see live_select_events / live_select_track) and can edit the song; most edits undo with live_undo. check_only reports whether it is enabled without running it.',
+  { title: z.string(), check_only: z.boolean().optional() },
+  guard(({ title, check_only }) => runMacro(call, { title, checkOnly: check_only })),
 );
 
 server.tool(

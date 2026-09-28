@@ -9,6 +9,9 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { bridgeStatus, call } from '../../src/bridge.js';
+import { pluginParamNames } from '../../src/plugins.js';
+import { arranger, listMacros, runMacro } from '../../src/arranger.js';
+import { tempo } from '../../src/tempo.js';
 
 let channels;
 let testChannel;
@@ -323,6 +326,122 @@ test('bypass one plug-in and restore it', async (t) => {
     const back = await call('setInsertBypass', { channel: withPlugin.channel, slot: slot.slot, bypassed: slot.bypassed });
     assert.equal(back.after, slot.bypassed);
   }
+});
+
+// ---- plug-in parameters, automation --------------------------------------------------
+
+test('plug-in parameters: read by discovered names, set one normalised, restore the raw value', async (t) => {
+  const rack = (await call('inserts', {})).find((c) => c.inserts.some((i) => pluginParamNames(i.name).names.length));
+  if (!rack) return t.skip('no channel has a PreSonus plug-in (e.g. Fat Channel or Pro EQ)');
+  const plug = rack.inserts.find((i) => pluginParamNames(i.name).names.length);
+  const r = await call('pluginParams', { channel: rack.channel, slot: plug.slot, names: pluginParamNames(plug.name).names });
+  assert.equal(r.plugin, plug.name);
+  assert.ok(r.params.length > 3, `${r.params.length} parameters answered`);
+  for (const p of r.params) assert.equal(typeof p.text, 'string', p.name);
+  const p = r.params.find((x) => typeof x.normalized === 'number' && x.max - x.min > 1);
+  assert.ok(p, 'a continuous parameter');
+  const target = p.normalized > 0.5 ? 0.25 : 0.75;
+  try {
+    const set = await call('setPluginParam', { channel: rack.channel, slot: plug.slot, param: p.name, normalized: target });
+    assert.ok(Math.abs(set.after.normalized - target) < 0.01, `${p.name}: ${set.after.normalized}`);
+    assert.notEqual(set.after.text, p.text);
+  } finally {
+    const back = await call('setPluginParam', { channel: rack.channel, slot: plug.slot, param: p.name, value: p.value });
+    assert.equal(back.after.value, p.value);
+  }
+  await assert.rejects(call('setPluginParam', { channel: rack.channel, slot: plug.slot, param: '__nope__', value: 1 }), /no parameter __nope__/);
+});
+
+test('automation: every channel has a mode; set one and restore it', async () => {
+  const now = await call('channels');
+  for (const c of now) assert.ok(c.automation === null || ['off', 'read', 'touch', 'latch', 'write'].includes(c.automation), `${c.label}: ${c.automation}`);
+  const before = now.find((c) => c.label === testChannel.label).automation;
+  const mode = before === 'read' ? 'off' : 'read';
+  try {
+    assert.deepEqual(await call('setAutomation', { channel: testChannel.label, mode }), { channel: testChannel.label, before, after: mode });
+  } finally {
+    assert.equal((await call('setAutomation', { channel: testChannel.label, mode: before })).after, before);
+  }
+});
+
+// ---- macros, arranger ------------------------------------------------------------------
+
+test('macros: listed by decoded title; one checked, not run', async (t) => {
+  const macros = await listMacros(call, { withState: true });
+  if (!macros.length) return t.skip('no macros');
+  for (const m of macros) assert.ok(!m.title.startsWith('Macro '), `undecoded: ${m.title}`);
+  const r = await runMacro(call, { title: macros[0].title, checkOnly: true });
+  assert.equal(typeof r.enabled, 'boolean');
+});
+
+// Seen on 5.5.2: Create Sections from Markers is one undo step and also shows the
+// arranger track; play, stop, jumps and the sync mode are not undo steps. The sync
+// mode cannot be read, so this test leaves it at Off (a fresh start had it at a
+// setting where the jump never came within 6 s). "Create Markers from Sections" is
+// enabled exactly while the arranger track is shown, not while sections exist.
+test('arranger: sections from markers, jump while playing, all restored', async () => {
+  const song0 = await call('song');
+  const t0 = song0.transport;
+  assert.equal(t0.playing, false, 'start the live suite with Studio One stopped');
+  const markers0 = (await call('markers')).markers.map((m) => m.seconds);
+  for (const s of [4, 8]) assert.ok(!markers0.includes(s), `no marker at ${s}s already`);
+  const arrangerShown = async () => (await call('command', { category: 'Arranger', name: 'Create Markers from Sections', checkOnly: true })).enabled;
+  const shown0 = await arrangerShown();
+  await assert.rejects(arranger(call, () => [], { action: 'next' }), /while playing/);
+  await call('addMarker', { seconds: 4 });
+  await call('addMarker', { seconds: 8 });
+  let created = false;
+  try {
+    created = (await arranger(call, () => [], { action: 'createFromMarkers' })).executed;
+    assert.equal(created, true);
+    assert.equal((await arranger(call, () => [], { action: 'syncMode', sync: 'off' })).executed, true);
+    await call('setTransport', { positionSeconds: 0 });
+    await call('transport', { action: 'play' });
+    await arranger(call, () => [], { action: 'goto', section: 3 });
+    let pos = 0;
+    for (let i = 0; i < 30 && !(pos >= 8 && pos < 12); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      pos = (await call('song')).transport.position.seconds;
+    }
+    assert.ok(pos >= 8 && pos < 12, `playing inside section 3 (8 s..), at ${pos}`);
+    const loop = (await call('song')).transport.loopRange;
+    assert.deepEqual([loop.start.seconds, loop.end.seconds], [t0.loopRange.start.seconds, t0.loopRange.end.seconds], 'loop range kept');
+  } finally {
+    await call('transport', { action: 'stop' });
+    if (created) await call('undo', {});
+    for (const s of [8, 4]) await call('deleteMarker', { seconds: s }).catch(() => {});
+    await call('setLoop', { start: t0.loopRange.start.seconds, end: t0.loopRange.end.seconds, enable: t0.loop });
+    await call('setTransport', { positionSeconds: t0.position.seconds });
+    for (const [i, name] of song0.selectedTracks.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+    if ((await arrangerShown()) !== shown0) await call('command', { category: 'View', name: 'Open Arranger Track' });
+  }
+  assert.deepEqual((await call('markers')).markers.map((m) => m.seconds), markers0);
+  assert.equal(await arrangerShown(), shown0, 'arranger track shown/hidden as before');
+});
+
+// Insert + set are two undo steps. "Tempo/Delete" is not used: it did not delete
+// the point at the playhead. A single-segment map is checked by changing the tempo
+// late in the song and seeing it at 2 s too (then undoing that).
+test('tempo: insert a change at 4 s, read it, two undos remove it', async () => {
+  const t0 = (await call('song')).transport;
+  const at = async (s) => (await tempo(call, { action: 'at', at: [s] })).tempo[0].bpm;
+  const base = await at(2);
+  assert.equal(await at(6), base, 'no tempo change between 2 s and 6 s to begin with');
+  const bpm = base === 90 ? 100 : 90;
+  const r = await tempo(call, { action: 'insert', at: 4, bpm });
+  try {
+    assert.equal(r.inserted.bpm, bpm);
+    assert.deepEqual([await at(2), await at(6)], [base, bpm]);
+  } finally {
+    await call('undo', { steps: 2 });
+  }
+  assert.deepEqual([await at(2), await at(6)], [base, base]);
+  await tempo(call, { action: 'set', at: 6, bpm: base + 1 });
+  const reach = await at(2);
+  await call('undo', {});
+  assert.equal(reach, base + 1, 'the point at 4 s is gone: one segment again');
+  assert.equal(await at(2), base);
+  assert.equal((await call('song')).transport.position.seconds, t0.position.seconds);
 });
 
 test('sends: set a level and restore it', async (t) => {

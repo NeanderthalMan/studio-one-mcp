@@ -59,3 +59,43 @@ test('setSend: level and mute; validation', () => {
   assert.match(ring('setSend', { channel: 'Vox', index: 0, level: 2 }).error, /level must be 0..1/);
   assert.match(ring('setSend', { channel: 'Vox', index: 3, level: 0.1 }).error, /no send 3/);
 });
+
+function pluginSetup() {
+  const host = fakeHost();
+  const mixer = fakeMixer([
+    { label: 'Vox', inserts: [{ name: 'Fat Channel', params: { 'comp.ratio': { value: 2, min: 1, max: 20, unit: ':1' }, 'comp.on': { value: 0 } } }, { name: 'Odd' }] },
+  ]);
+  const { component, params } = loadComponent({ host, config: { mailbox: MAILBOX }, mixer });
+  let n = 0;
+  const ring = (op, args) => {
+    host.client.write('request.json', { id: `p${++n}`, op, args });
+    component.paramChanged(params[0]);
+    return host.client.read('response.json');
+  };
+  return { ring, mixer };
+}
+
+test('pluginParams: named parameters with value, text, range, normalised; unknown names listed', () => {
+  const { ring } = pluginSetup();
+  const r = plain(ring('pluginParams', { channel: 'Vox', slot: 0, names: ['comp.ratio', 'nope'] }).result);
+  assert.equal(r.plugin, 'Fat Channel');
+  assert.deepEqual(r.params, [{ name: 'comp.ratio', value: 2, text: '2:1', min: 1, max: 20, normalized: 1 / 19 }]);
+  assert.deepEqual(r.missing, ['nope']);
+  assert.match(ring('pluginParams', { channel: 'Vox', slot: 3, names: [] }).error, /no plug-in in slot 3 on Vox/);
+  // A slot whose element has no reachable plug-in component fails cleanly.
+  assert.match(ring('pluginParams', { channel: 'Vox', slot: 1, names: ['x'] }).error, /cannot reach the plug-in/);
+});
+
+test('setPluginParam: by text, normalised or raw value; before/after; validation', () => {
+  const { ring, mixer } = pluginSetup();
+  const dev = mixer.elements[0].banks.inserts.els[0].device;
+  const byText = plain(ring('setPluginParam', { channel: 'Vox', slot: 0, param: 'comp.ratio', text: '4.0:1' }).result);
+  assert.deepEqual([byText.before.value, byText.after.value], [2, 4]);
+  ring('setPluginParam', { channel: 'Vox', slot: 0, param: 'comp.ratio', normalized: 1 });
+  assert.equal(dev.params['comp.ratio'].value, 20);
+  ring('setPluginParam', { channel: 'Vox', slot: 0, param: 'comp.on', value: 1 });
+  assert.equal(dev.params['comp.on'].value, 1);
+  assert.match(ring('setPluginParam', { channel: 'Vox', slot: 0, param: 'comp.ratio', normalized: 3 }).error, /normalized must be 0..1/);
+  assert.match(ring('setPluginParam', { channel: 'Vox', slot: 0, param: 'gone', value: 1 }).error, /no parameter gone on Fat Channel/);
+  assert.match(ring('setPluginParam', { channel: 'Vox', slot: 0, param: 'comp.ratio' }).error, /give one of/);
+});
