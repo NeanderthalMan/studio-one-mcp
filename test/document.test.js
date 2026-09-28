@@ -6,7 +6,7 @@ import { fakeHost, fakeDocument, loadCore, MAILBOX } from './helpers/s1host.js';
 
 const plain = (v) => JSON.parse(JSON.stringify(v));
 
-function setup({ tracks, noSong = false } = {}) {
+function setup({ tracks, noSong = false, markers = [0, 300] } = {}) {
   const doc = fakeDocument({
     title: 'Live Song',
     tracks: tracks || [
@@ -26,6 +26,28 @@ function setup({ tracks, noSong = false } = {}) {
     { category: 'Transport', name: 'Preroll', enabled: true, run: flip('preroll') },
     { category: 'Transport', name: 'Return to Zero', enabled: true, run: () => (p.primaryTime.value = 0) },
   ];
+  // Markers as the Marker commands see them: Recall Marker N exists for 1..20 and
+  // is enabled when marker N exists; Insert/Delete act at the playhead.
+  const marks = [...markers];
+  for (let i = 1; i <= 20; i++) {
+    commands.push({
+      category: 'Marker', name: `Recall Marker ${i}`,
+      get enabled() { return i <= marks.length; },
+      run: () => (p.primaryTime.value = marks[i - 1]),
+    });
+  }
+  commands.push(
+    { category: 'Marker', name: 'Insert', enabled: true, run: () => { marks.push(p.primaryTime.value); marks.sort((a, b) => a - b); } },
+    { category: 'Marker', name: 'Delete', enabled: true, run: () => { const k = marks.indexOf(p.primaryTime.value); if (k >= 0) marks.splice(k, 1); } },
+  );
+  // Event selection
+  let eventsSelected = false;
+  commands.push(
+    { category: 'Edit', name: 'Deselect All', enabled: true, run: () => (eventsSelected = false) },
+    { category: 'Edit', name: 'Select All', enabled: true, run: () => (eventsSelected = true) },
+    { category: 'Edit', name: 'Select All on Tracks', enabled: true, run: () => (eventsSelected = doc.mainTrackList.numSelectedTracks > 0) },
+    { category: 'Event', name: 'Mute Events', get enabled() { return eventsSelected; } },
+  );
   const host = fakeHost({ commands, document: noSong ? null : doc });
   const { get } = loadCore({ host, config: { mailbox: MAILBOX } });
   const bridge = new (get('Bridge'))({ mailbox: MAILBOX }, null);
@@ -38,7 +60,7 @@ function setup({ tracks, noSong = false } = {}) {
     assert.equal(res.id, id);
     return res;
   };
-  return { host, doc, ask };
+  return { host, doc, ask, marks };
 }
 
 test('song: title, transport, unique track count, selection', () => {
@@ -116,4 +138,57 @@ test('setTransport validates input', () => {
   assert.match(ask('setTransport', { tempo: '120' }).error, /tempo must be/);
   assert.match(ask('setTransport', { positionSeconds: -1 }).error, /positionSeconds/);
   assert.equal(doc.params.tempo.value, 120, 'rejected values are not applied');
+});
+
+test('song reports the file URL of the open document', () => {
+  const { ask } = setup();
+  assert.equal(plain(ask('song').result).fileUrl, 'file:///songs/Live Song/Live Song.song');
+});
+
+test('markers: positions via Recall Marker N, playhead restored', () => {
+  const { ask, doc } = setup({ markers: [0, 16, 300] });
+  doc.params.primaryTime.value = 7;
+  const r = plain(ask('markers').result);
+  assert.deepEqual(r.markers.map((m) => [m.number, m.seconds, m.display]), [[1, 0, '0001.01.01.00'], [2, 16, '0009.01.01.00'], [3, 300, '0151.01.01.00']]);
+  assert.equal(doc.params.primaryTime.value, 7, 'playhead put back');
+});
+
+test('markers refuse while playing (reading them moves the playhead)', () => {
+  const { ask, doc } = setup();
+  doc.params.start.value = 1;
+  assert.match(ask('markers').error, /stop playback first/);
+});
+
+test('addMarker at a position or at the playhead; playhead restored', () => {
+  const { ask, doc, marks } = setup();
+  doc.params.primaryTime.value = 3;
+  const r = plain(ask('addMarker', { seconds: 8 }).result);
+  assert.deepEqual([r.added, r.seconds, r.markers.map((m) => m.seconds)], [true, 8, [0, 8, 300]]);
+  ask('addMarker');
+  assert.deepEqual(marks, [0, 3, 8, 300], 'default is the playhead');
+  assert.equal(doc.params.primaryTime.value, 3);
+  assert.match(ask('addMarker', { seconds: -2 }).error, /seconds must be/);
+});
+
+test('deleteMarker by number or by position; unknown is an error', () => {
+  const { ask, marks, doc } = setup({ markers: [0, 8, 16, 300] });
+  doc.params.primaryTime.value = 5;
+  assert.equal(plain(ask('deleteMarker', { number: 2 }).result).deleted.seconds, 8);
+  assert.deepEqual(plain(ask('deleteMarker', { seconds: 16 }).result).markers.map((m) => m.seconds), [0, 300]);
+  assert.deepEqual(marks, [0, 300]);
+  assert.equal(doc.params.primaryTime.value, 5);
+  assert.match(ask('deleteMarker', { number: 9 }).error, /no marker number 9/);
+  assert.match(ask('deleteMarker', { seconds: 1.5 }).error, /no marker at 1.5s/);
+});
+
+test('selectEvents: by track(s), all, none; enables event commands', () => {
+  const { ask, host } = setup();
+  const one = plain(ask('selectEvents', { track: 'Keys' }).result);
+  assert.deepEqual([one.selectedTracks, one.eventCommandsEnabled], [['Keys'], true]);
+  assert.deepEqual(plain(ask('selectEvents', { tracks: ['Vox', 'Bass'] }).result).selectedTracks, ['Vox', 'Bass']);
+  assert.equal(plain(ask('selectEvents', { all: true }).result).eventCommandsEnabled, true);
+  assert.equal(plain(ask('selectEvents', { none: true }).result).events, 'none');
+  assert.equal(host.Host.GUI.Commands.interpretCommand('Event', 'Mute Events', true), false, 'deselected');
+  assert.match(ask('selectEvents', { track: 'Nope' }).error, /no track named Nope/);
+  assert.match(ask('selectEvents', {}).error, /required/);
 });

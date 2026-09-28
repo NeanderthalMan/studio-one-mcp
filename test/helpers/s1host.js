@@ -53,7 +53,7 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
   return {
     params, objs, rows, mainTrackList,
     urls: {
-      '://studioapp/DocumentManager': { activeDocument: { title } },
+      '://studioapp/DocumentManager': { activeDocument: { title, path: { url: `file:///songs/${title}/${title}.song` } } },
       '://hostapp/DocumentManager/ActiveDocument/Environment/TransportPanel': transportPanel,
       '://hostapp/DocumentManager/ActiveDocument/TrackList': { mainTrackList },
     },

@@ -162,3 +162,44 @@ test('transport: play then stop (never record), position restored', async () => 
   }
   await assert.rejects(call('transport', { action: 'explode' }), /action must be one of/);
 });
+
+// ---- markers, event selection -----------------------------------------------------
+
+test('markers: listed with positions, playhead untouched', async () => {
+  const pos = (await call('song')).transport.position.seconds;
+  const { markers } = await call('markers');
+  assert.ok(Array.isArray(markers));
+  for (const m of markers) assert.equal(typeof m.seconds, 'number');
+  assert.equal((await call('song')).transport.position.seconds, pos);
+});
+
+test('addMarker then deleteMarker leaves the markers as they were', async () => {
+  const before = (await call('markers')).markers.map((m) => m.seconds);
+  const at = 3.25;
+  assert.ok(!before.includes(at), 'no marker at the test position already');
+  const added = await call('addMarker', { seconds: at });
+  assert.ok(added.markers.some((m) => Math.abs(m.seconds - at) < 0.001), 'new marker present');
+  const deleted = await call('deleteMarker', { seconds: added.markers.find((m) => Math.abs(m.seconds - at) < 0.001).seconds });
+  assert.deepEqual(deleted.markers.map((m) => m.seconds), before);
+  await assert.rejects(call('deleteMarker', { number: 99 }), /no marker/);
+});
+
+test('selectEvents + Event/Mute Events + Unmute: events toggled and restored', async (t) => {
+  const tracks = await call('tracks');
+  const names = tracks.map((x) => x.name);
+  const target = tracks.find((x) => x.eventCount > 0 && names.indexOf(x.name) === names.lastIndexOf(x.name) && x.events.every((e) => !e.muted));
+  if (!target) return t.skip('no track with unmuted events');
+  const beforeSel = (await call('song')).selectedTracks;
+  try {
+    const sel = await call('selectEvents', { track: target.name });
+    assert.deepEqual([sel.selectedTracks, sel.eventCommandsEnabled], [[target.name], true]);
+    assert.deepEqual(await call('command', { category: 'Event', name: 'Mute Events' }), { executed: true });
+    assert.ok((await call('tracks', { name: target.name }))[0].events.every((e) => e.muted), 'muted');
+  } finally {
+    await call('command', { category: 'Event', name: 'Unmute Events' });
+    await call('selectEvents', { none: true });
+    for (const [i, name] of beforeSel.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  }
+  const after = (await call('tracks', { name: target.name })).find((x) => x.name === target.name);
+  assert.ok(after.events.every((e) => !e.muted), 'unmuted again');
+});

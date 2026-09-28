@@ -10,6 +10,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { readSong, summarizeSong } from './song.js';
+import { fileURLToPath } from 'node:url';
 import { listSongs, resolveSong, songFolder } from './library.js';
 import { bridgeStatus, call } from './bridge.js';
 import { midiPort } from './midi.js';
@@ -105,7 +106,10 @@ server.tool(
   'live_song',
   'The song open in Studio One right now: title, transport (playing, recording, loop, position, tempo, loop range, precount, preroll), track count and selected tracks. Unlike song_read this includes unsaved changes.',
   {},
-  guard(() => call('song')),
+  guard(async () => {
+    const song = await call('song');
+    return { ...song, file: song.fileUrl ? fileURLToPath(song.fileUrl) : null };
+  }),
 );
 
 server.tool(
@@ -146,6 +150,58 @@ server.tool(
     preroll: z.boolean().optional(),
   },
   guard(({ position_seconds, ...a }) => call('setTransport', { ...a, positionSeconds: position_seconds })),
+);
+
+// Marker names are not exposed live; take them from the last save by position.
+function nameMarkers(markers, fileUrl) {
+  let saved = [];
+  try {
+    if (fileUrl && existsSync(fileURLToPath(fileUrl))) saved = readSong(fileURLToPath(fileUrl)).markers;
+  } catch {
+    saved = [];
+  }
+  return markers.map((m) => {
+    const hit = saved.find((x) => Math.abs(x.seconds - m.seconds) < 0.01);
+    return { ...m, name: hit ? hit.name : null };
+  });
+}
+
+async function liveMarkers(result) {
+  const { fileUrl } = await call('song');
+  return { ...result, markers: nameMarkers(result.markers, fileUrl), note: 'Names come from the last save; a marker added since then has name null.' };
+}
+
+server.tool(
+  'live_markers',
+  'Markers of the song open in Studio One right now: number, position (seconds and bar display) and name (from the last save). Briefly moves the playhead to read them and puts it back; refuses while playing. Only markers 1-20 are visible.',
+  {},
+  guard(async () => liveMarkers(await call('markers'))),
+);
+
+server.tool(
+  'live_add_marker',
+  'Add a marker in the running Studio One at a position in seconds (default: the playhead). The playhead is left where it was.',
+  { seconds: z.number().optional() },
+  guard(async (a) => liveMarkers(await call('addMarker', a))),
+);
+
+server.tool(
+  'live_delete_marker',
+  'Delete a marker in the running Studio One, by number (from live_markers) or by exact position in seconds.',
+  { number: z.number().int().optional(), seconds: z.number().optional() },
+  guard(async (a) => liveMarkers(await call('deleteMarker', a))),
+);
+
+server.tool(
+  'live_select_events',
+  'Select all events on the named track(s), or on every track, or clear the event selection. Then use live_command for selection-based edits, e.g. Event/Mute Events, Event/Unmute Events, Event/Toggle Mute, Edit/Split at Cursor, Event/Quantize, Event/Transpose Events Up, Track/Activate Next Layer (switch takes), Edit/Undo.',
+  {
+    track: z.string().optional(),
+    tracks: z.array(z.string()).optional(),
+    all: z.boolean().optional(),
+    none: z.boolean().optional().describe('Deselect all events'),
+  },
+  guard((a) => call('selectEvents', a)),
 );
 
 server.tool(
