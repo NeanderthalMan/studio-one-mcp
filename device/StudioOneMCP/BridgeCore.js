@@ -145,6 +145,15 @@ class Bridge {
             case "addMarker": return this.addMarker(args);
             case "deleteMarker": return this.deleteMarker(args);
             case "selectEvents": return this.selectEvents(args);
+            case "setLoop": return this.setLoop(args);
+            case "takes": return this.takes(args);
+            case "save": return this.run("File", args.newVersion ? "Save New Version" : "Save");
+            case "undo": return this.repeat("Edit", "Undo", args.steps);
+            case "redo": return this.repeat("Edit", "Redo", args.steps);
+            case "trackState": return this.trackState(args);
+            case "editEvents": return this.editEvents(args);
+            case "addTrack": return this.addTrack(args);
+            case "meters": return this.fromComponent(c => c.meters());
             case "eval": return this.evaluate(args);
             default: return fail("unknown op: " + op);
         }
@@ -301,6 +310,10 @@ class Bridge {
             if (typeof args.positionSeconds !== "number" || args.positionSeconds < 0) return fail("positionSeconds must be a number >= 0");
             p.setValue(args.positionSeconds, true);
         }
+        if (args.positionBars !== undefined) {
+            const r = setTime(tp.findParameter("primaryTime"), args.positionBars);
+            if (isFail(r)) return r;
+        }
         const toggles = { loop: "Toggle Loop", precount: "Precount", preroll: "Preroll" };
         for (const key in toggles) {
             if (args[key] === undefined) continue;
@@ -411,6 +424,132 @@ class Bridge {
         };
     }
 
+    // ---- more editing tools ---------------------------------------------------
+
+    run(category, name) {
+        const r = this.command({ category: category, name: name });
+        if (isFail(r)) return r;
+        if (!r.executed) return fail(category + "/" + name + " is not available right now");
+        return r;
+    }
+
+    repeat(category, name, steps) {
+        const n = steps === undefined ? 1 : steps;
+        if (typeof n !== "number" || n < 1 || n > 50) return fail("steps must be 1 to 50");
+        let done = 0;
+        for (let i = 0; i < n; i++) {
+            const r = this.command({ category: category, name: name });
+            if (isFail(r)) return r;
+            if (!r.executed) break;
+            done++;
+        }
+        return { done: done };
+    }
+
+    // start/end: seconds (number) or a bar position string like "9.1.1.0".
+    setLoop(args) {
+        const tp = this.transportPanel();
+        if (!tp) return fail("no song open");
+        if (args.start !== undefined) { const r = setTime(tp.findParameter("loopStart"), args.start); if (isFail(r)) return r; }
+        if (args.end !== undefined) { const r = setTime(tp.findParameter("loopEnd"), args.end); if (isFail(r)) return r; }
+        if (args.enable !== undefined) {
+            const state = this.transportState();
+            if (!!args.enable !== state.loop) { const r = this.run("Transport", "Toggle Loop"); if (isFail(r)) return r; }
+        }
+        return this.transportState();
+    }
+
+    // Run fn with only the named track selected, then put the selection back.
+    withTrack(name, fn) {
+        const list = trackList();
+        if (!list) return fail("no song open");
+        const before = selectedTracks(list);
+        const sel = this.selectTrack({ name: name });
+        if (isFail(sel)) return sel;
+        const result = fn(list);
+        if (has(list, "unselectAll", "function")) list.unselectAll();
+        for (const t of before) list.selectTrack(t, true, false);
+        return result;
+    }
+
+    trackInfo(name) {
+        const found = this.tracks({ name: name, maxEvents: 20 });
+        if (isFail(found)) return found;
+        return found.find(t => t.name === name) || null;
+    }
+
+    takes(args) {
+        const actions = { list: null, next: "Activate Next Layer", previous: "Activate Previous Layer", unpack: "Unpack Layers to Tracks" };
+        const action = args.action || "list";
+        if (!(action in actions)) return fail("action must be one of " + Object.keys(actions).join(", "));
+        if (action !== "list") {
+            const r = this.withTrack(args.track, () => this.run("Track", actions[action]));
+            if (isFail(r)) return r;
+        } else if (!this.trackInfo(args.track)) {
+            return fail("no track named " + args.track);
+        }
+        const t = this.trackInfo(args.track);
+        return { track: args.track, action: action, takes: t ? t.takes : null, activeEvents: t ? t.events.map(e => e.name) : [] };
+    }
+
+    trackState(args) {
+        const actions = { arm: "Arm", monitor: "Monitor", mute: "Mute", solo: "Solo", hide: "Hide", duplicate: "Duplicate", showAll: null };
+        if (!(args.action in actions)) return fail("action must be one of " + Object.keys(actions).join(", "));
+        if (args.action === "showAll") return this.run("Edit", "Show All Tracks");
+        const r = this.withTrack(args.track, () => this.run("Track", actions[args.action]));
+        if (isFail(r)) return r;
+        const ch = this.component && has(this.component, "channels", "function") ? this.component.channels() : null;
+        const t = this.trackInfo(args.track);
+        const channel = Array.isArray(ch) && t ? ch.find(c => c.label === t.channel) || null : null;
+        return { track: args.track, action: args.action, channel: channel };
+    }
+
+    // Selection-based clip edits on one track; the playhead is restored.
+    editEvents(args) {
+        const actions = {
+            mute: ["Event", "Mute Events"], unmute: ["Event", "Unmute Events"], toggleMute: ["Event", "Toggle Mute"],
+            quantize: ["Event", "Quantize"], transposeUp: ["Event", "Transpose Events Up"], transposeDown: ["Event", "Transpose Events Down"],
+            split: ["Edit", "Split at Cursor"], trimStart: ["Event", "Trim Start to Cursor"], trimEnd: ["Event", "Trim End to Cursor"],
+            merge: ["Event", "Merge Events"], delete: ["Edit", "Delete"],
+        };
+        const cmd = actions[args.action];
+        if (!cmd) return fail("action must be one of " + Object.keys(actions).join(", "));
+        const atCursor = ["split", "trimStart", "trimEnd"].indexOf(args.action) >= 0;
+        if (atCursor && args.at === undefined) return fail(args.action + " needs at (seconds or bars)");
+        const tp = this.transportPanel();
+        if (!tp) return fail("no song open");
+        const pt = tp.findParameter("primaryTime");
+        const home = pt.value;
+        if (atCursor) { const r = setTime(pt, args.at); if (isFail(r)) return r; }
+        const r = this.withTrack(args.track, () => {
+            const sel = this.command({ category: "Edit", name: "Select All on Tracks" });
+            if (isFail(sel)) return sel;
+            const done = this.run(cmd[0], cmd[1]);
+            this.command({ category: "Edit", name: "Deselect All" });
+            return done;
+        });
+        pt.setValue(home, true);
+        if (isFail(r)) return r;
+        const t = this.trackInfo(args.track);
+        return { track: args.track, action: args.action, events: t ? t.events : [] };
+    }
+
+    addTrack(args) {
+        const types = {
+            audioMono: "Add Audio Track (mono)", audioStereo: "Add Audio Track (stereo)",
+            instrument: "Add Instrument Track", folder: "Add Folder Track", automation: "Add Automation Track",
+        };
+        const name = types[args.type || "audioMono"];
+        if (!name) return fail("type must be one of " + Object.keys(types).join(", "));
+        const list = trackList();
+        if (!list) return fail("no song open");
+        const before = uniqueTracks(list);
+        const r = this.run("Track", name);
+        if (isFail(r)) return r;
+        const added = uniqueTracks(list).filter(t => before.indexOf(t) < 0).map(t => String(t.name));
+        return { added: added, trackCount: uniqueTracks(list).length };
+    }
+
     // Arbitrary script, for exploring the host object model. Off unless the
     // installer was run with --allow-eval. Errors in the script are reported,
     // but a TypeError on a host object still raises Studio One's dialog.
@@ -468,6 +607,21 @@ function selectedTracks(list) {
         if (t && out.indexOf(t) < 0) out.push(t);
     }
     return out;
+}
+
+// A time parameter set from seconds (number) or a bar position string ("9.1.1.0").
+function setTime(param, value) {
+    if (!param || !has(param, "setValue", "function")) return fail("time parameter not available");
+    if (typeof value === "number") {
+        if (value < 0) return fail("time must be >= 0 seconds");
+        param.setValue(value, true);
+        return null;
+    }
+    if (typeof value === "string" && /^\d+(\.\d+){0,3}$/.test(value) && has(param, "fromString", "function")) {
+        param.fromString(value);
+        return null;
+    }
+    return fail("time must be seconds (number) or bars like \"9.1.1.0\"");
 }
 
 function seconds(time) {

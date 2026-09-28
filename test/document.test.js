@@ -2,66 +2,9 @@
 // document shaped like the 5.5.2 object model.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fakeHost, fakeDocument, loadCore, MAILBOX } from './helpers/s1host.js';
+import { setup } from './helpers/docbridge.js';
 
 const plain = (v) => JSON.parse(JSON.stringify(v));
-
-function setup({ tracks, noSong = false, markers = [0, 300] } = {}) {
-  const doc = fakeDocument({
-    title: 'Live Song',
-    tracks: tracks || [
-      { name: 'Vox', takes: 2, events: [{ name: 'Vox take', start: 0, end: 14.9 }] },
-      { name: 'Bass', color: 0x00ff00 },
-      { name: 'Keys', mediaType: 'Music', events: [{ name: 'Pad', start: 2, end: 6, muted: true }, { name: 'Pad 2', start: 8, end: 9 }] },
-    ],
-  });
-  const p = doc.params;
-  const flip = (name) => () => (p[name].value = p[name].value ? 0 : 1);
-  const commands = [
-    { category: 'Transport', name: 'Start', enabled: true, run: () => ((p.start.value = 1), (p.stop.value = 0)) },
-    { category: 'Transport', name: 'Stop', enabled: true, run: () => ((p.start.value = 0), (p.record.value = 0), (p.stop.value = 1)) },
-    { category: 'Transport', name: 'Record', enabled: true, run: () => ((p.record.value = 1), (p.start.value = 1)) },
-    { category: 'Transport', name: 'Toggle Loop', enabled: true, run: flip('loop') },
-    { category: 'Transport', name: 'Precount', enabled: true, run: flip('precount') },
-    { category: 'Transport', name: 'Preroll', enabled: true, run: flip('preroll') },
-    { category: 'Transport', name: 'Return to Zero', enabled: true, run: () => (p.primaryTime.value = 0) },
-  ];
-  // Markers as the Marker commands see them: Recall Marker N exists for 1..20 and
-  // is enabled when marker N exists; Insert/Delete act at the playhead.
-  const marks = [...markers];
-  for (let i = 1; i <= 20; i++) {
-    commands.push({
-      category: 'Marker', name: `Recall Marker ${i}`,
-      get enabled() { return i <= marks.length; },
-      run: () => (p.primaryTime.value = marks[i - 1]),
-    });
-  }
-  commands.push(
-    { category: 'Marker', name: 'Insert', enabled: true, run: () => { marks.push(p.primaryTime.value); marks.sort((a, b) => a - b); } },
-    { category: 'Marker', name: 'Delete', enabled: true, run: () => { const k = marks.indexOf(p.primaryTime.value); if (k >= 0) marks.splice(k, 1); } },
-  );
-  // Event selection
-  let eventsSelected = false;
-  commands.push(
-    { category: 'Edit', name: 'Deselect All', enabled: true, run: () => (eventsSelected = false) },
-    { category: 'Edit', name: 'Select All', enabled: true, run: () => (eventsSelected = true) },
-    { category: 'Edit', name: 'Select All on Tracks', enabled: true, run: () => (eventsSelected = doc.mainTrackList.numSelectedTracks > 0) },
-    { category: 'Event', name: 'Mute Events', get enabled() { return eventsSelected; } },
-  );
-  const host = fakeHost({ commands, document: noSong ? null : doc });
-  const { get } = loadCore({ host, config: { mailbox: MAILBOX } });
-  const bridge = new (get('Bridge'))({ mailbox: MAILBOX }, null);
-  let n = 0;
-  const ask = (op, args) => {
-    const id = `d${++n}`;
-    host.client.write('request.json', { id, op, args });
-    bridge.tick();
-    const res = host.client.read('response.json');
-    assert.equal(res.id, id);
-    return res;
-  };
-  return { host, doc, ask, marks };
-}
 
 test('song: title, transport, unique track count, selection', () => {
   const { ask } = setup();
