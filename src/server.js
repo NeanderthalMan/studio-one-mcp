@@ -17,6 +17,7 @@ import { midiPort } from './midi.js';
 import { pluginParamNames } from './plugins.js';
 import { arranger, listMacros, runMacro } from './arranger.js';
 import { tempo } from './tempo.js';
+import { trackEdit } from './tracks.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -131,6 +132,21 @@ server.tool(
     max_events: z.number().int().optional().describe('Per track (default 50)'),
   },
   guard(({ name, events, max_events }) => call('tracks', { name, events, maxEvents: max_events })),
+);
+
+// Studio One's default note names: middle C (MIDI 60) is C3.
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const noteName = (p) => `${NOTE_NAMES[p % 12]}${Math.floor(p / 12) - 2}`;
+
+server.tool(
+  'live_notes',
+  "Notes in an instrument track's parts in the running Studio One, unsaved edits included: pitch (MIDI number and name, middle C = C3 as Studio One shows it by default), velocity 0-127, start/end/length in seconds, and start in quarter-note beats. Read-only.",
+  { track: z.string().describe('Exact track name'), max_notes: z.number().int().optional().describe('Default 500') },
+  guard(async ({ track, max_notes }) => {
+    const r = await call('notes', { track, maxNotes: max_notes });
+    for (const p of r.parts) for (const n of p.notes) if (typeof n.pitch === 'number') n.note = noteName(n.pitch);
+    return r;
+  }),
 );
 
 server.tool(
@@ -431,6 +447,18 @@ server.tool(
     bpm: z.number().optional(),
   },
   guard((a) => tempo(call, a)),
+);
+
+server.tool(
+  'live_track_edit',
+  'Edit a track by exact name in the running Studio One: rename (and its mixer channel), color ("#rrggbb"), or remove. Rename and colour are not on the undo stack (the result has the "before" value); remove undoes with live_undo. The track selection is kept.',
+  {
+    track: z.string(),
+    action: z.enum(['rename', 'color', 'remove']),
+    name: z.string().optional().describe('For rename'),
+    color: z.string().optional().describe('For color: "#rrggbb"'),
+  },
+  guard((a) => trackEdit(call, a)),
 );
 
 // Sections of the open song as of its last save (the arranger track is not scriptable live).

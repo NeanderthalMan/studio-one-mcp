@@ -135,3 +135,24 @@ test('selectEvents: by track(s), all, none; enables event commands', () => {
   assert.match(ask('selectEvents', { track: 'Nope' }).error, /no track named Nope/);
   assert.match(ask('selectEvents', {}).error, /required/);
 });
+
+test('notes: per part, pitch / velocity 0-127 / times / beats; audio events skipped; capped', () => {
+  const { ask } = setup({
+    tracks: [
+      { name: 'Keys', mediaType: 'Music', events: [
+        { name: 'Riff', start: 2, end: 8, notes: [{ pitch: 64, velocity: 0.8, start: 2.28, end: 2.36 }, { pitch: 53, velocity: 1, start: 2.77, end: 2.81 }] },
+        { name: 'Empty', start: 9, end: 10, notes: [] },
+      ] },
+      { name: 'Vox', events: [{ name: 'Take', start: 0, end: 4 }] },
+    ],
+  });
+  const r = plain(ask('notes', { track: 'Keys' }).result);
+  assert.deepEqual(r.parts.map((p) => [p.name, p.noteCount]), [['Riff', 2], ['Empty', 0]]);
+  assert.deepEqual(r.parts[0].notes[0], { pitch: 64, velocity: 102, start: 2.28, end: 2.36, length: 0.08, beat: 4.56, muted: false });
+  assert.equal(r.truncated, false);
+  assert.equal(plain(ask('notes', { track: 'Keys', maxNotes: 2 }).result).truncated, false, 'exactly at the cap is not truncated');
+  const capped = plain(ask('notes', { track: 'Keys', maxNotes: 1 }).result);
+  assert.deepEqual([capped.parts[0].notes.length, capped.parts[0].noteCount, capped.truncated], [1, 2, true]);
+  assert.deepEqual(plain(ask('notes', { track: 'Vox' }).result).parts, []);
+  assert.match(ask('notes', { track: 'Nope' }).error, /no track named Nope/);
+});

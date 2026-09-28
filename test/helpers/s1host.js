@@ -43,7 +43,16 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
       currentEvents: () => takes[o.activeTake] || [],
       isEmpty: () => !o.currentEvents().length,
       createIterator: () => {
-        const evs = o.currentEvents().map((e) => ({ name: e.name, startTime: { seconds: e.start }, endTime: { seconds: e.end }, isMuted: e.muted ? 1 : 0 }));
+        // A part with `notes` walks them like 5.5.2 does: createSequenceIterator() with done()/next().
+        const seq = (notes) => () => {
+          const ns = notes.map((n) => ({ pitch: n.pitch, velocity: n.velocity, startTime: { seconds: n.start, musical: n.start * 2 }, endTime: { seconds: n.end } }));
+          let k = 0;
+          return { done: () => k >= ns.length, next: () => ns[k++] || null };
+        };
+        const evs = o.currentEvents().map((e) => ({
+          name: e.name, startTime: { seconds: e.start }, endTime: { seconds: e.end }, isMuted: e.muted ? 1 : 0,
+          ...(e.notes ? { createSequenceIterator: seq(e.notes) } : {}),
+        }));
         let k = 0;
         return { next: () => evs[k++] || null };
       },
@@ -197,7 +206,7 @@ export function fakeMixer(channels) {
 }
 
 const ParamID = {
-  kLabel: 'label', kVolume: 'volume', kPan: 'pan', kRecord: 'recordArmed', kChannelType: 'channelType', kAutoMode: 'automationMode',
+  kLabel: 'label', kVolume: 'volume', kPan: 'pan', kRecord: 'recordArmed', kChannelType: 'channelType', kAutoMode: 'automationMode', kColor: 'color',
   kInsertName: '@owner/deviceName', kInsertBypass: 'Inserts/bypassAll', kSendPort: 'sendPort', kSendLevel: 'sendlevel', kSendMute: 'sendMute',
 };
 

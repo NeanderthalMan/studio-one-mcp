@@ -222,6 +222,30 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         return out;
     }
 
+    // ---- channel name and colour ------------------------------------------------
+    //
+    // A track's own name and colour are read-only to scripts, but setting its
+    // channel's label / colour renames and recolours the track too (5.5.2). Colour
+    // is ARGB as a signed 32-bit number. Neither change is on the undo stack.
+
+    setChannelLabel(args) {
+        const c = this.channelByLabel(args.channel);
+        if (c.error) return c;
+        if (typeof args.name !== "string" || args.name === "") return { error: "name must be a non-empty string" };
+        c.el.setParamValue(PreSonus.ParamID.kLabel, args.name);
+        return { before: args.channel, after: String(this.readParam(c.el, PreSonus.ParamID.kLabel)) };
+    }
+
+    setChannelColor(args) {
+        const c = this.channelByLabel(args.channel);
+        if (c.error) return c;
+        if (typeof args.argb !== "number") return { error: "argb must be a number" };
+        const id = PreSonus.ParamID.kColor || "color";
+        const before = this.readParam(c.el, id);
+        c.el.setParamValue(id, args.argb);
+        return { channel: args.channel, before: before, after: this.readParam(c.el, id) };
+    }
+
     // ---- plug-in parameters -----------------------------------------------------
     //
     // An insert slot's component ("FX01") has a child component "Device": the

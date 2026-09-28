@@ -36,8 +36,15 @@ Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Window
 | `live_save`, `live_undo`, `live_redo` | Save (optionally as a new version), and undo or redo edits, with a step count. |
 | `live_inserts` / `live_bypass_insert` | Plug-ins on each channel (slot, name, bypassed), and bypass one slot or the whole rack. |
 | `live_sends` / `live_set_send` | Each channel's sends (destination name, level 0..1 and in dB, mute), and set a level or mute. |
+| `live_plugin_params` / `live_set_plugin_param` | A plug-in's parameters (value, display text like `"2.0:1"`, range, normalised value), and set one by display text, normalised value or raw value. Studio One cannot list a plug-in's parameters, so names come from its presets and Studio One's remote-control map, which covers the PreSonus plug-ins. For other plug-ins, pass the names. |
+| `live_set_automation` | Set a channel's automation mode: off, read, touch, latch or write. `live_channels` shows each channel's mode. |
+| `live_arranger` | Arranger sections: list them (from the last save), go to one by number or name (a jump at the sync point while playing, a playhead move while stopped), step next or previous while playing, set the sync mode, create sections from markers. The loop range is kept. |
+| `live_macros` / `live_run_macro` | The macros (built-in and your own) by title, and run one by title, or only check whether it is enabled. |
+| `live_tempo` | The tempo at any positions, set the tempo of the segment containing a position, or insert a tempo change (two undo steps). Studio One must be stopped; the playhead is put back. |
+| `live_notes` | Notes in an instrument track's parts: pitch (number and name, middle C = C3), velocity 0 to 127, start, end and length in seconds, start in beats. Read-only. |
+| `live_track_edit` | Rename, recolour (`"#rrggbb"`) or remove a track by name. Rename and colour are not on the undo stack; remove is. |
 | `live_record` | Record, which writes a take into the song. Only runs with `confirm: true`. It can arm a track first, start from a position, set precount, and stop after N seconds. |
-| `live_channels` | Live mixer: volume, pan, mute, solo and record-arm for each channel. |
+| `live_channels` | Live mixer: volume, pan, mute, solo, record-arm and automation mode for each channel. |
 | `live_set_channel` | Set volume, pan, mute, solo or record-arm on a channel. |
 | `live_command` | Run any of the roughly 1,000 Studio One commands, e.g. `Transport/Start`, `Edit/Undo`, `File/Save` or `View/Console`. `check_only` reports whether one is enabled without running it. |
 | `live_list_commands` | Discover command names, optionally with whether each is enabled right now. |

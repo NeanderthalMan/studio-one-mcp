@@ -12,6 +12,7 @@ import { bridgeStatus, call } from '../../src/bridge.js';
 import { pluginParamNames } from '../../src/plugins.js';
 import { arranger, listMacros, runMacro } from '../../src/arranger.js';
 import { tempo } from '../../src/tempo.js';
+import { trackEdit } from '../../src/tracks.js';
 
 let channels;
 let testChannel;
@@ -442,6 +443,44 @@ test('tempo: insert a change at 4 s, read it, two undos remove it', async () => 
   assert.equal(reach, base + 1, 'the point at 4 s is gone: one segment again');
   assert.equal(await at(2), base);
   assert.equal((await call('song')).transport.position.seconds, t0.position.seconds);
+});
+
+test('notes: an instrument part reads back with pitches, velocities and times inside the part', async (t) => {
+  const music = (await call('tracks')).find((x) => x.mediaType === 'Music' && x.eventCount > 0);
+  if (!music) return t.skip('no instrument track with a part');
+  const r = await call('notes', { track: music.name });
+  const part = r.parts.find((p) => p.noteCount > 0);
+  if (!part) return t.skip(`${music.name} has no notes`);
+  assert.equal(part.notes.length, Math.min(part.noteCount, 500));
+  for (const n of part.notes) {
+    assert.ok(Number.isInteger(n.pitch) && n.pitch >= 0 && n.pitch <= 127, `pitch ${n.pitch}`);
+    assert.ok(n.velocity >= 0 && n.velocity <= 127, `velocity ${n.velocity}`);
+    assert.ok(n.start >= part.start - 0.001 && n.end <= part.end + 0.001 && n.end >= n.start, `${n.start}-${n.end} in ${part.start}-${part.end}`);
+    assert.equal(typeof n.beat, 'number');
+  }
+});
+
+// A scratch track is added, renamed, recoloured and removed: the song ends as it began
+// (two undo steps: add, remove). Rename and colour are not undo steps.
+test('track edit: rename, colour and remove a scratch track; selection kept', async () => {
+  const song0 = await call('song');
+  const added = await call('addTrack', { type: 'audioMono' });
+  const scratch = added.added[0];
+  let name = scratch;
+  try {
+    const r = await trackEdit(call, { track: scratch, action: 'rename', name: 'MCP Scratch Track' });
+    name = r.renamed.after;
+    assert.equal(name, 'MCP Scratch Track');
+    const c = await trackEdit(call, { track: name, action: 'color', color: '#1e90ff' });
+    assert.equal(c.after, '#1e90ff');
+    assert.equal((await call('tracks', { name, events: false })).find((x) => x.name === name).color, '#1e90ff', 'the track shows the colour');
+  } finally {
+    await trackEdit(call, { track: name, action: 'remove' });
+  }
+  const song1 = await call('song');
+  assert.equal(song1.trackCount, song0.trackCount);
+  for (const [i, n] of song0.selectedTracks.entries()) await call('selectTrack', { name: n, exclusive: i === 0 });
+  assert.deepEqual((await call('song')).selectedTracks, song0.selectedTracks);
 });
 
 test('sends: set a level and restore it', async (t) => {
