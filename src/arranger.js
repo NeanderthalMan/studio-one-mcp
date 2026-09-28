@@ -7,7 +7,9 @@
 //    leave the playhead alone, so a stopped goto locates to the section's start
 //    from the last save instead.
 //    With a sync mode other than Off the jump waits; after a fresh start it did
-//    not come within 6 s, so set syncMode off for immediate jumps.
+//    not come within 6 s, so set syncMode off for immediate jumps. Setting the
+//    sync mode is an undo step when it changes the mode (and none when it does
+//    not), so never pair it with a fixed number of undos.
 //  - A goto has been seen to change the loop range to a section's range; it is
 //    put back afterwards.
 //  - Macro commands are named "Macro " + base64(title) in category "Macros".

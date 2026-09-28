@@ -471,7 +471,7 @@ async function savedSections() {
 
 server.tool(
   'live_arranger',
-  "Arranger sections in the running Studio One. sections: list them (numbered in song order, from the last save). goto: a section by number or name; while playing it jumps at the arranger's sync point, while stopped it moves the playhead to the section's start. next / previous: step while playing. syncMode: when jumps happen (off = immediately, 1bar, 2bars, 4bars, end of section). createFromMarkers: make sections between markers (undo with live_undo). The loop range is kept.",
+  "Arranger sections in the running Studio One. sections: list them (numbered in song order, from the last save). goto: a section by number or name; while playing it jumps at the arranger's sync point, while stopped it moves the playhead to the section's start. next / previous: step while playing. syncMode: when jumps happen (off = immediately, 1bar, 2bars, 4bars, end of section); changing it is an undo step. createFromMarkers: make sections between markers (undo with live_undo). The loop range is kept.",
   {
     action: z.enum(['sections', 'goto', 'next', 'previous', 'syncMode', 'createFromMarkers']),
     section: z.union([z.number().int(), z.string()]).optional().describe('For goto: section number (1-16) or name'),
