@@ -302,3 +302,36 @@ test('save is available (checked, not run)', async () => {
   assert.equal(typeof (await call('command', { category: 'File', name: 'Save', checkOnly: true })).enabled, 'boolean');
   assert.equal(typeof (await call('command', { category: 'File', name: 'Save New Version', checkOnly: true })).enabled, 'boolean');
 });
+
+// ---- inserts, sends ---------------------------------------------------------------
+// (live_record is never exercised here: it writes a take into the song.)
+
+test('inserts: listed for every channel', async () => {
+  const r = await call('inserts', {});
+  assert.equal(r.length, channels.length);
+  for (const c of r) for (const i of c.inserts) assert.equal(typeof i.name, 'string');
+});
+
+test('bypass one plug-in and restore it', async (t) => {
+  const withPlugin = (await call('inserts', {})).find((c) => c.inserts.length);
+  if (!withPlugin) return t.skip('no channel has a plug-in; add one (e.g. Pro EQ) to test bypass');
+  const slot = withPlugin.inserts[0];
+  try {
+    const r = await call('setInsertBypass', { channel: withPlugin.channel, slot: slot.slot, bypassed: !slot.bypassed });
+    assert.equal(r.after, !slot.bypassed);
+  } finally {
+    const back = await call('setInsertBypass', { channel: withPlugin.channel, slot: slot.slot, bypassed: slot.bypassed });
+    assert.equal(back.after, slot.bypassed);
+  }
+});
+
+test('sends: set a level and restore it', async (t) => {
+  const withSend = (await call('sends', {})).find((c) => c.sends.length);
+  if (!withSend) return t.skip('no channel has a send');
+  const s = withSend.sends[0];
+  try {
+    assert.equal((await call('setSend', { channel: withSend.channel, index: s.index, level: s.level > 0.5 ? 0.25 : 0.75 })).send.level > 0, true);
+  } finally {
+    assert.equal((await call('setSend', { channel: withSend.channel, index: s.index, level: s.level })).send.level, s.level);
+  }
+});

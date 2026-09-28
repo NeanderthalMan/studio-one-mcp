@@ -4,7 +4,8 @@
      as the CC121's lock button: a trigger control toggling a component param, so
      every press lands in the component's paramChanged. <Value> would be the
      wrong element here: it maps param -> control (LEDs), not control -> param.
-     The mixer mapping gives the script every console channel. -->
+     The mixer mapping gives the script every console channel,
+     with its insert slots and sends. -->
 <ControlSurface>
 	<Controls>
 		<Control name="bridgeTick" type="trigger" options="receive">
@@ -19,7 +20,15 @@
 		<DeviceMapping device="MixerConsole" name="mixer">
 			<ScrollBank target="AllBank" pagesize="256" name="channels">
 				<foreach variable="$ch" count="256">
-					<Strip/>
+					<Strip>
+						<!-- Per channel: plug-in slots (names via @owner/deviceName) and sends. -->
+						<Bank target="Inserts" name="inserts">
+							<foreach variable="$i" count="16"><Strip/></foreach>
+						</Bank>
+						<Bank target="Sends" name="sends">
+							<foreach variable="$s" count="8"><Strip/></foreach>
+						</Bank>
+					</Strip>
 				</foreach>
 			</ScrollBank>
 		</DeviceMapping>

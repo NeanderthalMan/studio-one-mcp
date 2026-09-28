@@ -53,10 +53,11 @@ async function call(name, args = {}) {
 test('exposes the song and live tools', async () => {
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
-    'live_add_marker', 'live_add_track', 'live_channels', 'live_command', 'live_delete_marker', 'live_edit_events',
-    'live_eval', 'live_list_commands', 'live_markers', 'live_meters', 'live_redo', 'live_save', 'live_select_events',
-    'live_select_track', 'live_set_channel', 'live_set_loop', 'live_set_transport', 'live_song', 'live_status',
-    'live_takes', 'live_track_state', 'live_tracks', 'live_transport', 'live_undo',
+    'live_add_marker', 'live_add_track', 'live_bypass_insert', 'live_channels', 'live_command', 'live_delete_marker',
+    'live_edit_events', 'live_eval', 'live_inserts', 'live_list_commands', 'live_markers', 'live_meters', 'live_record',
+    'live_redo', 'live_save', 'live_select_events', 'live_select_track', 'live_sends', 'live_set_channel',
+    'live_set_loop', 'live_set_send', 'live_set_transport', 'live_song', 'live_status', 'live_takes', 'live_track_state',
+    'live_tracks', 'live_transport', 'live_undo',
     'song_history', 'song_list', 'song_read',
   ]);
 });
@@ -123,4 +124,11 @@ test('live_status when Studio One closed the bridge', async () => {
   const { data } = await call('live_status');
   assert.equal(data.connected, false);
   assert.match(data.reason, /closed/);
+});
+
+test('live_record refuses without confirm: true (it writes a take into the song)', async () => {
+  const r = await client.callTool({ name: 'live_record', arguments: {} });
+  assert.equal(r.isError, true);
+  const r2 = await client.callTool({ name: 'live_record', arguments: { confirm: false } });
+  assert.equal(r2.isError, true);
 });

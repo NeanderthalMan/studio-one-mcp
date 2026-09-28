@@ -83,6 +83,112 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         return els.map(c => ({ label: c.label, left: this.readParam(c.el, "level1"), right: this.readParam(c.el, "level2") }));
     }
 
+    // ---- inserts and sends ----------------------------------------------------
+    //
+    // Each channel strip carries two sub-banks from the surface file. Names come
+    // from the bank element (@owner/deviceName, as Studio One's SDK names it);
+    // bypass is the channel's own "Inserts/[i]/@bypass" parameter (used by the
+    // built-in Mackie script). Every host member is checked before it is called.
+
+    subBank(el, name) {
+        if (!el || typeof el.find !== "function") return null;
+        const bank = el.find(name);
+        return bank && typeof bank.getElement === "function" ? bank : null;
+    }
+
+    channelByLabel(label) {
+        const els = this.channelElements();
+        if (els.error) return els;
+        const matches = els.filter(c => c.label === label);
+        if (matches.length !== 1) return { error: matches.length ? "channel name is ambiguous: " + label : "no channel named " + label };
+        return matches[0];
+    }
+
+    insertsOf(el) {
+        const bank = this.subBank(el, "inserts");
+        const out = [];
+        if (!bank) return out;
+        for (let i = 0; i < 16; i++) {
+            const slot = bank.getElement(i);
+            if (!slot || typeof slot.isConnected !== "function" || !slot.isConnected()) continue;
+            const name = this.readParam(slot, PreSonus.ParamID.kInsertName);
+            if (name === null || String(name) === "") continue;
+            out.push({ slot: i, name: String(name), bypassed: !!this.readParam(el, "Inserts/[" + i + "]/@bypass") });
+        }
+        return out;
+    }
+
+    inserts(args) {
+        const els = this.channelElements();
+        if (els.error) return els;
+        const want = args && args.channel;
+        const out = [];
+        for (const c of els) {
+            if (want && c.label !== want) continue;
+            out.push({ channel: c.label, bypassAll: !!this.readParam(c.el, PreSonus.ParamID.kInsertBypass), inserts: this.insertsOf(c.el) });
+        }
+        if (want && !out.length) return { error: "no channel named " + want };
+        return out;
+    }
+
+    // slot: number, or "all" for the channel's bypass-all switch.
+    setInsertBypass(args) {
+        const c = this.channelByLabel(args.channel);
+        if (c.error) return c;
+        const param = args.slot === "all" ? PreSonus.ParamID.kInsertBypass : "Inserts/[" + args.slot + "]/@bypass";
+        if (args.slot !== "all") {
+            const slot = this.insertsOf(c.el).find(x => x.slot === args.slot);
+            if (!slot) return { error: "no plug-in in slot " + args.slot + " on " + args.channel };
+        }
+        const before = this.readParam(c.el, param);
+        c.el.setParamValue(param, args.bypassed ? 1 : 0);
+        return { channel: args.channel, slot: args.slot, before: !!before, after: !!this.readParam(c.el, param) };
+    }
+
+    sendsOf(el) {
+        const bank = this.subBank(el, "sends");
+        const out = [];
+        if (!bank) return out;
+        for (let i = 0; i < 8; i++) {
+            const send = bank.getElement(i);
+            if (!send || typeof send.isConnected !== "function" || !send.isConnected()) continue;
+            const port = this.readParam(send, PreSonus.ParamID.kSendPort);
+            if (port === null || String(port) === "") continue;
+            out.push({ index: i, to: String(port), level: this.readParam(send, PreSonus.ParamID.kSendLevel), muted: !!this.readParam(send, PreSonus.ParamID.kSendMute) });
+        }
+        return out;
+    }
+
+    sends(args) {
+        const els = this.channelElements();
+        if (els.error) return els;
+        const want = args && args.channel;
+        const out = [];
+        for (const c of els) {
+            if (want && c.label !== want) continue;
+            const s = this.sendsOf(c.el);
+            if (want || s.length) out.push({ channel: c.label, sends: s });
+        }
+        if (want && !out.length) return { error: "no channel named " + want };
+        return out;
+    }
+
+    setSend(args) {
+        const c = this.channelByLabel(args.channel);
+        if (c.error) return c;
+        const bank = this.subBank(c.el, "sends");
+        const send = bank ? bank.getElement(args.index) : null;
+        if (!send || !this.sendsOf(c.el).some(x => x.index === args.index)) return { error: "no send " + args.index + " on " + args.channel };
+        const out = { channel: args.channel, index: args.index };
+        if (args.level !== undefined) {
+            if (typeof args.level !== "number" || args.level < 0 || args.level > 1) return { error: "level must be 0..1 (Studio One's normalised send level)" };
+            send.setParamValue(PreSonus.ParamID.kSendLevel, args.level);
+        }
+        if (args.muted !== undefined) send.setParamValue(PreSonus.ParamID.kSendMute, args.muted ? 1 : 0);
+        out.send = this.sendsOf(c.el).find(x => x.index === args.index);
+        return out;
+    }
+
     setChannel(args) {
         const fields = { volume: PreSonus.ParamID.kVolume, pan: PreSonus.ParamID.kPan, mute: "mute", solo: "solo", recordArmed: PreSonus.ParamID.kRecord };
         const param = fields[args.field];

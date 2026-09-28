@@ -34,6 +34,9 @@ Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Window
 | `live_add_track` | Add an audio (mono or stereo), instrument, folder or automation track. |
 | `live_meters` | Peak dB for every channel. With `duration_ms`, it samples during playback and reports the highest peak and any clipping. |
 | `live_save`, `live_undo`, `live_redo` | Save (optionally as a new version), and undo or redo edits, with a step count. |
+| `live_inserts` / `live_bypass_insert` | Plug-ins on each channel (slot, name, bypassed), and bypass one slot or the whole rack. |
+| `live_sends` / `live_set_send` | Each channel's sends (destination, level, mute), and set a level or mute. |
+| `live_record` | Record, which writes a take into the song. Only runs with `confirm: true`. It can arm a track first, start from a position, set precount, and stop after N seconds. |
 | `live_channels` | Live mixer: volume, pan, mute, solo and record-arm for each channel. |
 | `live_set_channel` | Set volume, pan, mute, solo or record-arm on a channel. |
 | `live_command` | Run any of the roughly 1,000 Studio One commands, e.g. `Transport/Start`, `Edit/Undo`, `File/Save` or `View/Console`. `check_only` reports whether one is enabled without running it. |
