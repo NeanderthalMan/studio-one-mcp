@@ -4,7 +4,9 @@
 //  - The transport's tempo parameter reads and writes the tempo of the segment
 //    under the playhead, so moving the playhead samples the tempo map.
 //  - "Tempo/Insert" adds a tempo point at the playhead (same tempo as before).
-//    Inserting and then setting its tempo are two undo steps.
+//    Inserting and then setting its tempo are two undo steps. But in a full live
+//    run the first Edit/Undo after them was refused (not executed) and the next
+//    undid an earlier edit, so callers must verify rather than count undos.
 //  - "Tempo/Delete" does not delete the point at the playhead (it changed a
 //    different part of the map), so it is not offered; undo removes points.
 
@@ -39,7 +41,7 @@ export async function tempo(call, { action, at, bpm }) {
         const r = await call('command', { category: 'Tempo', name: 'Insert' });
         if (!r.executed) throw new Error('Tempo/Insert did not run');
         await call('setTransport', { tempo: bpm });
-        return { inserted: await sample(here), note: 'Two undo steps: live_undo with steps 2 removes this tempo change.' };
+        return { inserted: await sample(here), note: 'Usually two undo steps (insert, set). Check with action "at" after undoing: Studio One has refused an undo right after a tempo edit.' };
       }
       default:
         throw new Error(`unknown action ${action}`);

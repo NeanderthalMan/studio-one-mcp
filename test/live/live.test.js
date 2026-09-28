@@ -407,29 +407,24 @@ test("arranger: goto a saved section while stopped moves the playhead there", as
   }
 });
 
-// Insert + set are two undo steps. "Tempo/Delete" is not used: it did not delete
-// the point at the playhead. A single-segment map is checked by changing the tempo
-// late in the song and seeing it at 2 s too (then undoing that).
-test('tempo: insert a change at 4 s, read it, two undos remove it', async () => {
-  const t0 = (await call('song')).transport;
-  const at = async (s) => (await tempo(call, { action: 'at', at: [s] })).tempo[0].bpm;
+// Reads and sets only: a set is reverted exactly by setting the old tempo back.
+// Insert is not run here: removing a tempo point needs undo, and in a full run
+// Studio One refused the first Edit/Undo right after it (done 0) and the second
+// undid an earlier edit instead, so an undo count cannot be trusted to clean up.
+// ("Tempo/Delete" is no help either: it did not delete the point at the playhead.)
+test("tempo: read at positions, set the segment and set it back", async () => {
+  const t0 = (await call("song")).transport;
+  const at = async (s) => (await tempo(call, { action: "at", at: [s] })).tempo[0].bpm;
   const base = await at(2);
-  assert.equal(await at(6), base, 'no tempo change between 2 s and 6 s to begin with');
-  const bpm = base === 90 ? 100 : 90;
-  const r = await tempo(call, { action: 'insert', at: 4, bpm });
+  const r = await tempo(call, { action: "at", at: [2, "3.1.1.0"] });
+  assert.deepEqual(r.tempo.map((x) => typeof x.bpm), ["number", "number"]);
   try {
-    assert.equal(r.inserted.bpm, bpm);
-    assert.deepEqual([await at(2), await at(6)], [base, bpm]);
+    const set = await tempo(call, { action: "set", at: 2, bpm: base + 1 });
+    assert.deepEqual([set.before.bpm, set.after.bpm], [base, base + 1]);
   } finally {
-    await call('undo', { steps: 2 });
+    assert.equal((await tempo(call, { action: "set", at: 2, bpm: base })).after.bpm, base);
   }
-  assert.deepEqual([await at(2), await at(6)], [base, base]);
-  await tempo(call, { action: 'set', at: 6, bpm: base + 1 });
-  const reach = await at(2);
-  await call('undo', {});
-  assert.equal(reach, base + 1, 'the point at 4 s is gone: one segment again');
-  assert.equal(await at(2), base);
-  assert.equal((await call('song')).transport.position.seconds, t0.position.seconds);
+  assert.equal((await call("song")).transport.position.seconds, t0.position.seconds);
 });
 
 test('notes: an instrument part reads back with pitches, velocities and times inside the part', async (t) => {
