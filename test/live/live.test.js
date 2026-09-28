@@ -237,26 +237,35 @@ test('setTransport position in bars', async () => {
 test('takes: next then previous restores the active take', async (t) => {
   const track = await uniqueNamed((x) => x.takes > 1);
   if (!track) return t.skip('no track with more than one take');
+  // Layers do not wrap: on the last take "next" is a no-op, so step whichever way moves.
   const list = await call('takes', { track: track.name });
-  const next = await call('takes', { track: track.name, action: 'next' });
+  const same = (r) => r.activeEvents.join() === list.activeEvents.join();
+  let [dir, back] = ['next', 'previous'];
+  let moved = await call('takes', { track: track.name, action: dir });
+  if (same(moved)) {
+    [dir, back] = [back, dir];
+    moved = await call('takes', { track: track.name, action: dir });
+  }
   try {
-    assert.notDeepEqual(next.activeEvents, list.activeEvents, 'a different take is playing');
+    assert.ok(!same(moved), 'a different take is playing');
   } finally {
-    const back = await call('takes', { track: track.name, action: 'previous' });
-    assert.deepEqual(back.activeEvents, list.activeEvents);
+    if (!same(moved)) assert.ok(same(await call('takes', { track: track.name, action: back })), 'original take restored');
   }
 });
 
-test('trackState mute, then undo restores the channel', async () => {
+// Mute is not on Studio One's undo stack: an undo here reverts the edit before it (it
+// once flipped the take the test above had just restored). Toggle back instead.
+test('trackState mute toggles the channel, and toggling again restores it', async () => {
   const track = await uniqueNamed();
-  const before = (await call('channels')).find((c) => c.label === track.channel);
+  const muteOf = async () => (await call('channels')).find((c) => c.label === track.channel).mute;
+  const before = await muteOf();
   const r = await call('trackState', { track: track.name, action: 'mute' });
   try {
-    assert.equal(r.channel.mute, before.mute ? 0 : 1);
+    assert.equal(r.channel.mute, before ? 0 : 1);
   } finally {
-    await call('undo', {});
+    if ((await muteOf()) !== before) await call('trackState', { track: track.name, action: 'mute' });
   }
-  assert.equal((await call('channels')).find((c) => c.label === track.channel).mute, before.mute);
+  assert.equal(await muteOf(), before);
 });
 
 test('editEvents split, then undo restores the events', async (t) => {

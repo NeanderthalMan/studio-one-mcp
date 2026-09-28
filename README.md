@@ -110,7 +110,7 @@ npm test            # unit and end-to-end tests; no Studio One needed
 npm run test:live   # against a running Studio One with the bridge installed
 ```
 
-The unit tests run the real device scripts under `node:vm` against a fake Studio One host (`test/helpers/s1host.js`). The live tests change only what they restore: one channel's mute, solo and volume, the tempo, the playhead, loop, the track selection, and a play/stop. They never record. They also add a marker at 3.25 s and delete it again, mute a track's events and unmute them, switch takes and back, and split a clip, mute a track and add a track, each followed by Undo. File/Save is only checked, never run.
+The unit tests run the real device scripts under `node:vm` against a fake Studio One host (`test/helpers/s1host.js`). The live tests change only what they restore: one channel's mute, solo and volume, the tempo, the playhead, loop, the track selection, and a play/stop. They never record. They also add a marker at 3.25 s and delete it again, mute a track's events and unmute them, switch takes and back (in whichever direction moves: layers do not wrap), mute a track and mute it again (track mute is not on Studio One's undo stack, so an Undo there reverts the edit before it), and split a clip and add a track, each followed by Undo. File/Save is only checked, never run.
 
 Security: anything that can write to the mailbox folder, which means anything running as your user, can drive Studio One through it. With `--allow-eval`, it can also run arbitrary script inside Studio One. Keep the folder local, and leave eval off unless you are exploring.
 

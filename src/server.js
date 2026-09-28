@@ -216,7 +216,7 @@ server.tool(
 
 server.tool(
   'live_takes',
-  "A track's takes (layers) in the running Studio One: list them, switch to the next/previous take, or unpack all takes to separate tracks. Returns the number of takes and the names of the clips now playing.",
+  "A track's takes (layers) in the running Studio One: list them, switch to the next/previous take, or unpack all takes to separate tracks. Returns the number of takes and the names of the clips now playing. Takes do not wrap: next on the last take (or previous on the first) changes nothing.",
   { track: z.string(), action: z.enum(['list', 'next', 'previous', 'unpack']).optional() },
   guard((a) => call('takes', a)),
 );
@@ -244,7 +244,7 @@ server.tool(
 
 server.tool(
   'live_track_state',
-  "Toggle a track's arm / monitor / mute / solo, hide it, or duplicate it, by track name; showAll unhides every track. Returns the track's mixer channel afterwards. The track selection is restored.",
+  "Toggle a track's arm / monitor / mute / solo, hide it, or duplicate it, by track name; showAll unhides every track. Returns the track's mixer channel afterwards. The track selection is restored. Mute is not on Studio One's undo stack: revert it by toggling again, since live_undo would undo the edit before it.",
   { track: z.string().optional(), action: z.enum(['arm', 'monitor', 'mute', 'solo', 'hide', 'duplicate', 'showAll']) },
   guard((a) => call('trackState', a)),
 );
