@@ -50,6 +50,28 @@ test('transport positions are seconds', () => {
 
 test('summary is compact', () => {
   const sum = summarizeSong(readSong(fixture()));
-  assert.deepEqual(sum.tracks, [{ name: 'Vox', type: 'Audio', events: 1, takes: 2, activeTake: 'Vox Take 2', volumeDb: -6.02, mute: true, solo: undefined, inserts: ['Pro EQ'] }]);
+  assert.deepEqual(sum.tracks, [{ name: 'Vox', type: 'Audio', events: 1, notes: undefined, automation: undefined, takes: 2, activeTake: 'Vox Take 2', volumeDb: -6.02, mute: true, solo: undefined, inserts: ['Pro EQ'] }]);
   assert.deepEqual(sum.markers, ['Start @ bar 1', 'Chorus @ bar 5']);
+});
+
+test('instrument part notes from the clip performance (UBJSON), placed by the part offset', () => {
+  const s = readSong(fixture({ extras: true }));
+  const part = s.tracks.find((t) => t.name === 'Keys').events[0];
+  assert.deepEqual(part.notes.map((n) => [n.pitch, n.velocity, n.start.beats, n.start.seconds, n.lengthBeats]), [
+    [60, 102, 4.5, 2.25, 0.5],
+    [64, 127, 6, 3, 1],
+  ]);
+  assert.ok(!('performance' in s.media.find((m) => m.id === '{CLIP-M}')), 'raw performance not echoed in media');
+  assert.equal(summarizeSong(s).tracks.find((t) => t.name === 'Keys').notes, 2);
+});
+
+test('insert settings from the saved preset; automation mode and envelopes with points', () => {
+  const s = readSong(fixture({ extras: true }));
+  const vox = s.mixer.find((c) => c.label === 'Vox');
+  assert.deepEqual(vox.inserts[0].settings, { format: 'fxpreset', values: { lffreq: 40, lfgain: -3.5 } });
+  assert.equal(vox.automation, 'read');
+  assert.deepEqual(s.automation, [{ channel: 'Vox', parameter: 'Volume', bipolar: false, points: [{ time: 0, value: 0.5 }, { time: 8, value: 1 }] }]);
+  const sum = summarizeSong(s);
+  assert.deepEqual(sum.automation, ['Vox/Volume: 2 points']);
+  assert.equal(sum.tracks.find((t) => t.name === 'Vox').automation, 'read');
 });

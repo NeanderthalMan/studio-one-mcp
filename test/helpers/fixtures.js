@@ -78,19 +78,68 @@ const metaXml = `<MetaInformation>
   <Attribute id="Media:KeySignature" value="-"/>
 </MetaInformation>`;
 
-export function writeSong(path, { title = 'Fixture Song' } = {}) {
+// UBJSON as Studio One writes it in Performances/*.musicx and Envelopes/*.envelopex:
+// objects, arrays, int8/int32 and float64, keys as int8-length strings.
+export function encodeUbjson(v) {
+  const parts = [];
+  const push = (...bytes) => parts.push(Buffer.from(bytes));
+  const key = (k) => { const s = Buffer.from(k, 'utf8'); push(0x69, s.length); parts.push(s); };
+  const val = (x) => {
+    if (x === null) return push(0x5a);
+    if (typeof x === 'boolean') return push(x ? 0x54 : 0x46);
+    if (Number.isInteger(x) && x >= -128 && x <= 127) return push(0x69, x & 0xff);
+    if (Number.isInteger(x)) { const b = Buffer.alloc(5); b[0] = 0x6c; b.writeInt32BE(x, 1); return parts.push(b); }
+    if (typeof x === 'number') { const b = Buffer.alloc(9); b[0] = 0x44; b.writeDoubleBE(x, 1); return parts.push(b); }
+    if (Array.isArray(x)) { push(0x5b); x.forEach(val); return push(0x5d); }
+    push(0x7b);
+    for (const [k, y] of Object.entries(x)) { key(k); val(y); }
+    return push(0x7d);
+  };
+  val(v);
+  return new Uint8Array(Buffer.concat(parts));
+}
+
+// Extras (opt-in so the base fixture's expectations stay put): an instrument
+// track "Keys" whose part shows clip beats 4..12 at song beat 4, a saved Pro EQ
+// state for the Vox insert, Vox in automation Read, and a Vox volume envelope.
+const keysTrack = `
+      <MediaTrack mediaType="Music" name="Keys" timeFormat="2">
+        <List x:id="Layers"><Attributes id="0" layerName="Keys.1"><List x:id="Events">
+          <MusicPart clipID="{CLIP-M}" timeFormat="2" start="4" length="8" offset="4" name="Keys"/>
+        </List></Attributes></List>
+      </MediaTrack>`;
+const keysClip = `<MediaFolder name="Music"><MusicClip mediaID="{CLIP-M}" name="Keys">
+  <Url x:id="dataPath" type="1" url="media:///Performances/Keys/Keys(0).musicx"/></MusicClip></MediaFolder>`;
+export const KEYS_NOTES = [
+  { start: 4.5, pitch: 60, noteId: 1, length: 0.5, velocity: 0.8 },
+  { start: 6, pitch: 64, noteId: 2, length: 1, velocity: 1 },
+  { start: 12.5, pitch: 67, noteId: 3, length: 0.5, velocity: 0.5 }, // after the part's end: hidden
+];
+
+export function writeSong(path, { title = 'Fixture Song', extras = false } = {}) {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, zipSync({
+  const files = {
     'metainfo.xml': strToU8(metaXml.replace('Fixture Song', title)),
-    'Song/song.xml': strToU8(songXml),
-    'Song/mediapool.xml': strToU8(mediaXml),
-    'Devices/audiomixer.xml': strToU8(mixerXml),
+    'Song/song.xml': strToU8(extras ? songXml.replace('<ArrangerTrack', `${keysTrack}\n      <ArrangerTrack`) : songXml),
+    'Song/mediapool.xml': strToU8(extras ? mediaXml.replace('</MediaFolder></Attributes>', `</MediaFolder>${keysClip}</Attributes>`) : mediaXml),
+    'Devices/audiomixer.xml': strToU8(extras
+      ? mixerXml
+        .replace('<Attributes x:id="deviceData" name="Pro EQ"/>', '<Attributes x:id="deviceData" name="Pro EQ"/><String x:id="presetPath" text="Presets/Channels/Vox/1 - Pro EQ.fxpreset"/>')
+        .replace('<Connection x:id="destination" friendlyName="Main"/>', '<Connection x:id="destination" friendlyName="Main"/><Attributes x:id="Automation" mode="1"/>')
+      : mixerXml),
     'Devices/transportdevice.xml': strToU8('<TransportDevice position="20" loopStart="0" loopEnd="4" loopActive="1"/>'),
-  }));
+  };
+  if (extras) {
+    files['Performances/Keys/Keys(0).musicx'] = encodeUbjson({ timeFormat: 2, events: KEYS_NOTES, envelopes: [] });
+    files['Presets/Channels/Vox/1 - Pro EQ.fxpreset'] = strToU8('﻿<AudioEffectPreset><Attributes x:id="ParameterData" lffreq="40" lfgain="-3.5"/></AudioEffectPreset>');
+    files['Envelopes/Vox/Volume.envelopex'] = encodeUbjson({ bipolar: 0, events: [{ time: 0, value: 0.5 }, { time: 8, value: 1 }] });
+    files['Envelopes/Vox/Pan.envelopex'] = encodeUbjson({ bipolar: 1, events: [] });
+  }
+  writeFileSync(path, zipSync(files));
   return path;
 }
 
-export function fixture() {
-  return writeSong(join(mkdtempSync(join(tmpdir(), 's1mcp-')), 'Fixture Song.song'));
+export function fixture(opts = {}) {
+  return writeSong(join(mkdtempSync(join(tmpdir(), 's1mcp-')), 'Fixture Song.song'), opts);
 }
 

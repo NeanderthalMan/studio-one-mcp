@@ -44,7 +44,7 @@ server.tool(
 
 server.tool(
   'song_read',
-  'Read a Studio One song from its .song file: tempo, time signature, markers, arranger sections, tracks with takes/clips (bar, beat and seconds), mixer channels with volume/pan/mute/solo and plug-in inserts, and media files. Reflects the last save, not unsaved edits.',
+  "Read a Studio One song from its .song file: tempo, time signature, markers, arranger sections, tracks with takes/clips (bar, beat and seconds) and instrument notes, mixer channels with volume/pan/mute/solo, automation mode and plug-in inserts (with each plug-in's saved settings in its own units, for PreSonus plug-ins), automation envelopes that have points, and media files. Reflects the last save, not unsaved edits. Notes, settings and envelope points are in detail=full.",
   {
     song: z.string().describe('Song title, part of one (newest match wins), or absolute path to a .song file'),
     detail: z.enum(['summary', 'full']).optional().describe('summary (default): one line per track. full: every take and clip.'),

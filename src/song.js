@@ -10,17 +10,19 @@ import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unzipSync, strFromU8 } from 'fflate';
 import { parseXml, kids, child, byXid, walk, num } from './xml.js';
+import { decodeUbjson } from './ubjson.js';
 
 const round = (n, d = 3) => (Number.isFinite(n) ? Math.round(n * 10 ** d) / 10 ** d : n);
 
 export function openSongArchive(path) {
   const entries = unzipSync(readFileSync(path));
   const text = (name) => (entries[name] ? strFromU8(entries[name]) : null);
+  const raw = (name) => entries[name] || null;
   const xml = (name) => {
     const t = text(name);
     return t ? parseXml(t) : null;
   };
-  return { names: Object.keys(entries), text, xml };
+  return { names: Object.keys(entries), text, raw, xml };
 }
 
 // ---- time ---------------------------------------------------------------
@@ -127,6 +129,8 @@ export function readMediaPool(poolRoot) {
       id: n.attrs.mediaID,
       kind: n.tag,
       file: fileUrlToPath(byXid(n, 'path')?.attrs.url),
+      // Instrument parts: "media:///Performances/<track>/<name>.musicx", inside the .song.
+      data: byXid(n, 'dataPath')?.attrs.url || undefined,
       durationSeconds: frames && rate ? round(frames / rate) : null,
       sampleRate: rate,
       channels: num(fmt && fmt.attrs.numChannels, null),
@@ -154,6 +158,16 @@ function readEvent(ev, t, media) {
   }
   if (ev.attrs.mute === '1') out.muted = true;
   if (ev.attrs.color) out.color = ev.attrs.color;
+  // Instrument part: its clip's performance holds the notes in clip beats; the
+  // part shows clip beats [offset, offset + length) at song beat `start`.
+  const perf = ev.attrs.clipID ? media.get(ev.attrs.clipID)?.performance : null;
+  if (perf && Array.isArray(perf.events)) {
+    const offset = num(ev.attrs.offset);
+    out.notes = perf.events
+      .filter((n) => typeof n.pitch === 'number' && n.start >= offset && n.start < offset + length)
+      .map((n) => ({ pitch: n.pitch, velocity: Math.round(num(n.velocity) * 127), ...t.span(start + n.start - offset, num(n.length)) }));
+    return out;
+  }
   // Note/controller events and anything else we don't model: pass numeric attrs through.
   const notes = [];
   for (const n of walk(ev)) {
@@ -210,24 +224,86 @@ function readTrack(tr, t, media) {
 
 const toDb = (g) => (g > 0 ? round(20 * Math.log10(g), 2) : -Infinity);
 
+const AUTOMATION_MODES = ['off', 'read', 'touch', 'latch', 'write'];
+
+// Nested JSON sections -> dotted names ("comp.ratio"), as the live plug-in names them.
+function flattenValues(obj, prefix = '', out = {}) {
+  for (const [k, v] of Object.entries(obj || {})) {
+    const name = prefix ? `${prefix}.${k}` : k;
+    if (k.startsWith('__')) continue; // internal (__classid of a swappable section)
+    if (v && typeof v === 'object' && !Array.isArray(v)) flattenValues(v, name, out);
+    else out[name] = typeof v === 'number' ? round(v, 4) : v;
+  }
+  return out;
+}
+
+// An insert's saved state, from the preset file the song keeps for it
+// (<String x:id="presetPath">). Values are in the preset's own units (dB, Hz,
+// seconds), not the live raw values. Third-party formats are only named.
+export function readInsertSettings(zip, presetPath) {
+  if (!zip || !presetPath) return null;
+  const format = presetPath.split('.').pop();
+  const text = zip.text(presetPath);
+  if (text === null) return { format, missing: true };
+  const body = text.replace(/^﻿/, '').trimStart();
+  if (body.startsWith('{')) {
+    try {
+      return { format, values: flattenValues(JSON.parse(body).parameters) };
+    } catch {
+      return { format };
+    }
+  }
+  if (body.startsWith('<')) {
+    const values = {};
+    for (const n of walk(parseXml(body))) {
+      if (n.attrs['x:id'] !== 'ParameterData') continue;
+      for (const [k, v] of Object.entries(n.attrs)) if (k !== 'x:id') values[k] = num(v, v);
+    }
+    return Object.keys(values).length ? { format, values } : { format };
+  }
+  return { format }; // binary (VST / AU state)
+}
+
 // Plug-in slots are the rack's un-named children (<Attributes name="FX01">);
 // siblings with an x:id (Presets, Combinator) are rack state, not plug-ins.
-function readInserts(rack, postFader = false) {
+function readInserts(rack, postFader = false, zip = null) {
   return kids(rack, 'Attributes')
     .filter((s) => !s.attrs['x:id'])
     .map((slot, i) => {
       const cls = byXid(byXid(slot, 'ghostData'), 'classInfo');
+      const settings = readInsertSettings(zip, byXid(slot, 'presetPath')?.attrs.text);
       return {
         slot: i,
         postFader: postFader || undefined,
         name: byXid(slot, 'deviceData')?.attrs.name || cls?.attrs.name || slot.attrs.name || '',
         category: cls?.attrs.subCategory || cls?.attrs.category || null,
         bypassed: slot.attrs.bypass === '1' || undefined,
+        ...(settings ? { settings } : {}),
       };
     });
 }
 
-export function readMixer(mixerRoot) {
+// Automation envelopes: Envelopes/<channel>/<parameter>.envelopex (UBJSON
+// { bipolar, events }). Only envelopes with points are listed; points are passed
+// through as stored.
+export function readEnvelopes(zip) {
+  const out = [];
+  for (const name of zip.names.filter((n) => /^Envelopes\/.+\.envelopex$/.test(n)).sort()) {
+    let env;
+    try {
+      env = decodeUbjson(zip.raw(name));
+    } catch {
+      continue;
+    }
+    const points = Array.isArray(env?.events) ? env.events : [];
+    if (!points.length) continue;
+    const [, channel, parameter] = /^Envelopes\/(.+)\/([^/]+)\.envelopex$/.exec(name);
+    out.push({ channel, parameter, bipolar: !!env.bipolar, points });
+  }
+  return out;
+}
+
+export function readMixer(mixerRoot, zip = null) {
   if (!mixerRoot) return [];
   const channels = [];
   for (const group of [...walk(mixerRoot)].filter((n) => n.tag === 'ChannelGroup')) {
@@ -245,7 +321,8 @@ export function readMixer(mixerRoot) {
         solo: ch.attrs.solo === '1',
         format: byXid(ch, 'speakerType')?.attrs.type || null,
         output: dest ? dest.attrs.friendlyName || null : null,
-        inserts: [...readInserts(byXid(ch, 'Inserts')), ...readInserts(byXid(ch, 'PostFaderInserts'), true)],
+        inserts: [...readInserts(byXid(ch, 'Inserts'), false, zip), ...readInserts(byXid(ch, 'PostFaderInserts'), true, zip)],
+        automation: AUTOMATION_MODES[num(byXid(ch, 'Automation')?.attrs.mode, 0)] || null,
         sends: sends.length,
         recordArmed: byXid(byXid(byXid(ch, 'RecordUnit'), 'recordPort'), 'data')?.attrs.recordArmed === '1' || undefined,
       });
@@ -262,6 +339,16 @@ export function readSong(path) {
   if (!song) throw new Error(`${path}: no Song/song.xml — not a Studio One song`);
   const t = buildTimeline(song);
   const media = readMediaPool(zip.xml('Song/mediapool.xml'));
+  for (const clip of media.values()) {
+    const entry = clip.data && clip.data.startsWith('media:///') ? decodeURI(clip.data.slice('media:///'.length)) : null;
+    const bytes = entry ? zip.raw(entry) : null;
+    if (!bytes) continue;
+    try {
+      clip.performance = decodeUbjson(bytes);
+    } catch {
+      clip.performance = null;
+    }
+  }
   const meta = {};
   for (const a of kids(zip.xml('metainfo.xml'), 'Attribute')) meta[a.attrs.id] = a.attrs.value;
   // Transport positions are stored in seconds, unlike events (beats).
@@ -271,7 +358,7 @@ export function readSong(path) {
   const tracks = kids(byXid(root, 'Tracks')).map((tr) => readTrack(tr, t, media));
   const markerTrack = tracks.find((tr) => tr.type === 'MarkerTrack');
   const arranger = tracks.find((tr) => tr.type === 'ArrangerTrack');
-  const mixer = readMixer(zip.xml('Devices/audiomixer.xml'));
+  const mixer = readMixer(zip.xml('Devices/audiomixer.xml'), zip);
   const byChannel = new Map(mixer.map((c) => [c.id, c]));
 
   return {
@@ -298,10 +385,11 @@ export function readSong(path) {
       .filter((tr) => tr !== markerTrack && tr !== arranger)
       .map((tr) => {
         const ch = byChannel.get(tr.channelId);
-        return ch ? { ...tr, mixer: { volumeDb: ch.volumeDb, pan: ch.pan, mute: ch.mute, solo: ch.solo, output: ch.output, inserts: ch.inserts } } : tr;
+        return ch ? { ...tr, mixer: { volumeDb: ch.volumeDb, pan: ch.pan, mute: ch.mute, solo: ch.solo, output: ch.output, automation: ch.automation, inserts: ch.inserts } } : tr;
       }),
     mixer,
-    media: [...media.values()],
+    automation: readEnvelopes(zip),
+    media: [...media.values()].map(({ performance, ...clip }) => clip),
     notes: zip.text('notes.txt') || '',
   };
 }
@@ -323,6 +411,8 @@ export function summarizeSong(s) {
       name: tr.name,
       type: tr.mediaType || tr.type,
       events: tr.events.length,
+      notes: tr.events.some((e) => e.notes) ? tr.events.reduce((n, e) => n + (e.notes?.length || 0), 0) : undefined,
+      automation: tr.mixer?.automation && tr.mixer.automation !== 'off' ? tr.mixer.automation : undefined,
       takes: tr.layers ? tr.layers.length : undefined,
       activeTake: tr.layers ? tr.layers.find((l) => l.active)?.name : undefined,
       volumeDb: tr.mixer?.volumeDb,
@@ -332,5 +422,6 @@ export function summarizeSong(s) {
     })),
     buses: s.mixer.filter((c) => !['AudioTrack', 'AudioInput'].includes(c.kind)).map((c) => `${c.kind}: ${c.label}`),
     mediaFiles: s.media.length,
+    automation: s.automation.length ? s.automation.map((e) => `${e.channel}/${e.parameter}: ${e.points.length} points`) : undefined,
   };
 }
