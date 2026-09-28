@@ -19,10 +19,15 @@ Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Window
 | `song_read` | One song, as a `summary` (one line per track) or `full` (every take and clip). Positions are given as bar/beat and as seconds. |
 | `song_history` | A song's autosaves, for comparing versions. |
 | `live_status` | Whether the bridge is reachable. If not, it says why. |
+| `live_song` | The open song as it is right now, unsaved changes included: title, transport (playing, recording, loop, position, tempo, loop range, precount, preroll), track count, selected tracks. |
+| `live_tracks` | Tracks with media type, colour, mixer channel, number of takes, selection, and events (name, start, end, length in seconds, muted). |
+| `live_select_track` | Select a track by name, so that selection-based commands act on it. |
+| `live_transport` | Press a transport button: play, stop, record, return to zero, rewind or forward a bar, go to the loop start or end, toggle loop, click, precount or preroll. |
+| `live_set_transport` | Set the tempo, playhead position (seconds), and loop, precount or preroll on or off. |
 | `live_channels` | Live mixer: volume, pan, mute, solo and record-arm for each channel. |
 | `live_set_channel` | Set volume, pan, mute, solo or record-arm on a channel. |
-| `live_command` | Run any Studio One command, e.g. `Transport/Start`, `Edit/Undo` or `Song/Save`. |
-| `live_list_commands` | Discover command names. |
+| `live_command` | Run any of the roughly 1,000 Studio One commands, e.g. `Transport/Start`, `Edit/Undo`, `File/Save` or `View/Console`. `check_only` reports whether one is enabled without running it. |
+| `live_list_commands` | Discover command names, optionally with whether each is enabled right now. |
 | `live_eval` | Run JavaScript inside Studio One to explore its object model. Opt-in only. |
 
 ## Install
@@ -70,6 +75,20 @@ response.json  device → client   {id, ok, result | error}
 ```
 
 The client re-sends the press every 150 ms until a response arrives. The component answers each request id once, and the client sends one request at a time.
+
+Two rules for anything that runs inside Studio One, both learned on 5.5.2:
+
+- Never `throw`. An exception raised while Studio One is calling into a script becomes a modal **Scripting Error** dialog, even when the code catches it. While that dialog is open, some edits (mute, solo) silently do not apply. The device scripts return errors as values, and a test enforces it.
+- Never call a member of a host object without first checking that it exists. A TypeError on a host object raises the same dialog.
+
+## Testing
+
+```sh
+npm test            # unit and end-to-end tests; no Studio One needed
+npm run test:live   # against a running Studio One with the bridge installed
+```
+
+The unit tests run the real device scripts under `node:vm` against a fake Studio One host (`test/helpers/s1host.js`). The live tests change only what they restore: one channel's mute, solo and volume, the tempo, the playhead, loop, the track selection, and a play/stop. They never record.
 
 Security: anything that can write to the mailbox folder, which means anything running as your user, can drive Studio One through it. With `--allow-eval`, it can also run arbitrary script inside Studio One. Keep the folder local, and leave eval off unless you are exploring.
 
