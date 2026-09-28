@@ -90,7 +90,9 @@ test('command executes: View/Console toggled twice leaves the window as it was',
 test('eval (when installed with --allow-eval)', async (t) => {
   if (!bridgeStatus().allowEval) return t.skip('bridge installed without --allow-eval');
   assert.equal(await call('eval', { code: 'return 6 * 7' }), 42);
-  await assert.rejects(call('eval', { code: 'throw new Error("nope")' }), /nope/);
+  // No "throws" case here: on 5.5.2 a throw inside Studio One pops a Scripting
+  // Error dialog (the first time per session), even though the bridge catches
+  // it. test/core.test.js covers the error path with the fake host.
   const n = await call('eval', { code: 'const b = component.hostComponent.model.root.find("mixer").find("channels"); let n = 0; for (let i = 0; i < 256; i++) { const e = b.getElement(i); if (e && e.isConnected()) n++; } return n;' });
   assert.equal(n, channels.length);
 });

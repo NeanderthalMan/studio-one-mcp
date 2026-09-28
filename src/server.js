@@ -169,7 +169,7 @@ server.tool(
 
 server.tool(
   'live_eval',
-  "Run JavaScript inside Studio One's script engine and return the result (host objects are described to a depth). Globals: Host, PreSonus, component, describe. Only works when the bridge was installed with --allow-eval. Useful for exploring the undocumented object model, e.g. Host.Objects.getObjectByUrl('://studioapp/DocumentManager').",
+  "Run JavaScript inside Studio One's script engine and return the result (host objects are described to a depth). Globals: Host, PreSonus, component, describe. Only works when the bridge was installed with --allow-eval. Useful for exploring the undocumented object model, e.g. Host.Objects.getObjectByUrl('://studioapp/DocumentManager'). Do not throw, and check that a host member exists (typeof) before calling it: either one pops a modal Scripting Error dialog in Studio One.",
   { code: z.string().describe('Function body; use `return` to send a value back'), depth: z.number().int().optional() },
   guard((a) => call('eval', a, { timeoutMs: 15000 })),
 );

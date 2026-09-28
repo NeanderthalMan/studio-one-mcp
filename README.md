@@ -80,6 +80,7 @@ Two rules for anything that runs inside Studio One, both learned on 5.5.2:
 
 - Never `throw`. An exception raised while Studio One is calling into a script becomes a modal **Scripting Error** dialog, even when the code catches it. While that dialog is open, some edits (mute, solo) silently do not apply. The device scripts return errors as values, and a test enforces it.
 - Never call a member of a host object without first checking that it exists. A TypeError on a host object raises the same dialog.
+- The same goes for code sent through `live_eval`. A `throw` there popped the dialog in testing, the first time in a session, even though the bridge catches it and reports the error.
 
 ## Testing
 
