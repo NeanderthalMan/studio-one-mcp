@@ -10,7 +10,57 @@ import { fileURLToPath } from 'node:url';
 export const deviceDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'device', 'StudioOneMCP');
 export const MAILBOX = 'file:///mailbox/';
 
-export function fakeHost({ commands = [] } = {}) {
+// A document as the live object model showed it on 5.5.2: TransportPanel
+// parameters (tempo in bpm, times in seconds with a display string) and a
+// mainTrackList whose tracks with takes appear once per lane (same object).
+export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } = {}) {
+  const param = (name, value, { min = 0, max = 1, display } = {}) => ({
+    name, value, min, max,
+    get string() { return display ? display(this.value) : String(this.value); },
+    setValue(v) { this.value = v; },
+  });
+  const bars = (sec) => `${String(Math.floor(sec / 2) + 1).padStart(4, '0')}.01.01.00`; // 120 bpm, 4/4
+  const params = {
+    start: param('start', 0), stop: param('stop', 1), record: param('record', 0), loop: param('loop', 0),
+    precount: param('precount', 0), preroll: param('preroll', 0),
+    tempo: param('tempo', tempo, { min: 10, max: 400, display: (v) => v.toFixed(2) }),
+    primaryTime: param('primaryTime', 0, { display: bars }),
+    primaryTimeFormat: param('primaryTimeFormat', 2, { display: () => 'Bars' }),
+    loopStart: param('loopStart', 0, { display: bars }),
+    loopEnd: param('loopEnd', 16, { display: bars }),
+  };
+  const transportPanel = { findParameter: (n) => params[n] || null };
+  const objs = tracks.map((t, i) => ({
+    name: t.name, mediaType: t.mediaType || 'Audio', color: t.color ?? 0xffc693, trackIndex: i + 1,
+    channel: { label: t.channel || t.name }, layers: { count: t.takes || 1 },
+    isEmpty: () => !(t.events || []).length,
+    createIterator: () => {
+      const evs = (t.events || []).map((e) => ({ name: e.name, startTime: { seconds: e.start }, endTime: { seconds: e.end }, isMuted: e.muted ? 1 : 0 }));
+      let k = 0;
+      return { next: () => evs[k++] || null };
+    },
+  }));
+  const rows = objs.flatMap((o, i) => Array((tracks[i].takes || 1) > 1 ? 2 + tracks[i].takes : 1).fill(o));
+  let selected = [];
+  const mainTrackList = {
+    get numTracks() { return rows.length; },
+    getTrack: (i) => rows[i],
+    get numSelectedTracks() { return selected.length; },
+    getSelectedTrack: (i) => selected[i],
+    selectTrack: (t, state) => { if (state && !selected.includes(t)) selected.push(t); },
+    unselectAll: () => { selected = []; },
+  };
+  return {
+    params, objs, rows, mainTrackList,
+    urls: {
+      '://studioapp/DocumentManager': { activeDocument: { title } },
+      '://hostapp/DocumentManager/ActiveDocument/Environment/TransportPanel': transportPanel,
+      '://hostapp/DocumentManager/ActiveDocument/TrackList': { mainTrackList },
+    },
+  };
+}
+
+export function fakeHost({ commands = [], document = null } = {}) {
   const files = new Map(); // url string -> contents
   const logs = [];
   const executed = [];
@@ -40,6 +90,7 @@ export function fakeHost({ commands = [] } = {}) {
           if (checkOnly) return !!cmd.enabled;
           if (!cmd.enabled) return false;
           executed.push({ command: key(c, n), args });
+          if (cmd.run) cmd.run();
           return true;
         },
         newCommandIterator: () => {
@@ -50,6 +101,7 @@ export function fakeHost({ commands = [] } = {}) {
       },
     },
     Attributes: (pairs) => ({ pairs }),
+    Objects: { getObjectByUrl: (url) => (document && document.urls[url]) || null },
     Console: { writeLine: (s) => logs.push(String(s)) },
   };
 

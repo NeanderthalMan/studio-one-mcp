@@ -90,7 +90,75 @@ test('command executes: View/Console toggled twice leaves the window as it was',
 test('eval (when installed with --allow-eval)', async (t) => {
   if (!bridgeStatus().allowEval) return t.skip('bridge installed without --allow-eval');
   assert.equal(await call('eval', { code: 'return 6 * 7' }), 42);
-  await assert.rejects(call('eval', { code: 'throw new Error("nope")' }), /nope/);
+  // No "throws" case here: on 5.5.2 a throw inside Studio One pops a Scripting
+  // Error dialog (the first time per session), even though the bridge catches
+  // it. test/core.test.js covers the error path with the fake host.
   const n = await call('eval', { code: 'const b = component.hostComponent.model.root.find("mixer").find("channels"); let n = 0; for (let i = 0; i < 256; i++) { const e = b.getElement(i); if (e && e.isConnected()) n++; } return n;' });
   assert.equal(n, channels.length);
+});
+
+// ---- song, tracks, selection, transport ------------------------------------------
+
+test('song: title, transport and track count', async () => {
+  const s = await call('song');
+  assert.equal(typeof s.title, 'string');
+  assert.ok(s.trackCount > 0);
+  assert.equal(typeof s.transport.tempo, 'number');
+  assert.match(s.transport.position.display, /\d/);
+  assert.ok(Array.isArray(s.selectedTracks));
+});
+
+test('tracks: deduplicated (a track with takes is listed once) and consistent with song', async () => {
+  const tracks = await call('tracks');
+  const song = await call('song');
+  assert.equal(tracks.length, song.trackCount);
+  for (const t of tracks) {
+    assert.equal(typeof t.name, 'string');
+    assert.equal(t.events.length, Math.min(t.eventCount, 50));
+    for (const e of t.events) assert.ok(e.end >= e.start, `${t.name}: ${e.name}`);
+  }
+  const names = tracks.map((t) => t.name);
+  const unique = tracks.filter((t) => names.indexOf(t.name) === names.lastIndexOf(t.name));
+  assert.ok(unique.length > 0);
+});
+
+test('selectTrack: select one, then restore the previous selection', async () => {
+  const before = (await call('song')).selectedTracks;
+  const tracks = await call('tracks', { events: false });
+  const names = tracks.map((t) => t.name);
+  const target = names.find((n) => names.indexOf(n) === names.lastIndexOf(n));
+  try {
+    assert.deepEqual((await call('selectTrack', { name: target })).selected, [target]);
+    assert.deepEqual((await call('song')).selectedTracks, [target]);
+    await assert.rejects(call('selectTrack', { name: '__no such track__' }), /no track named/);
+  } finally {
+    for (const [i, name] of before.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  }
+});
+
+test('setTransport: tempo, position and loop round trips, restored', async () => {
+  const t0 = (await call('song')).transport;
+  try {
+    const t1 = await call('setTransport', { tempo: t0.tempo + 1, positionSeconds: 2, loop: !t0.loop });
+    assert.equal(t1.tempo, t0.tempo + 1);
+    assert.equal(t1.position.seconds, 2);
+    assert.equal(t1.loop, !t0.loop);
+    await assert.rejects(call('setTransport', { tempo: 1 }), /tempo must be/);
+  } finally {
+    const back = await call('setTransport', { tempo: t0.tempo, positionSeconds: t0.position.seconds, loop: t0.loop });
+    assert.deepEqual([back.tempo, back.position.seconds, back.loop], [t0.tempo, t0.position.seconds, t0.loop]);
+  }
+});
+
+test('transport: play then stop (never record), position restored', async () => {
+  const t0 = (await call('song')).transport;
+  assert.equal(t0.playing, false, 'start the live suite with Studio One stopped');
+  try {
+    assert.equal((await call('transport', { action: 'play' })).transport.playing, true);
+    await new Promise((r) => setTimeout(r, 300));
+  } finally {
+    assert.equal((await call('transport', { action: 'stop' })).transport.playing, false);
+    await call('setTransport', { positionSeconds: t0.position.seconds });
+  }
+  await assert.rejects(call('transport', { action: 'explode' }), /action must be one of/);
 });

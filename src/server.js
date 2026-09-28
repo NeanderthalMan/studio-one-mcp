@@ -102,6 +102,53 @@ server.tool(
 );
 
 server.tool(
+  'live_song',
+  'The song open in Studio One right now: title, transport (playing, recording, loop, position, tempo, loop range, precount, preroll), track count and selected tracks. Unlike song_read this includes unsaved changes.',
+  {},
+  guard(() => call('song')),
+);
+
+server.tool(
+  'live_tracks',
+  'Tracks of the song open in Studio One right now, with media type, colour, mixer channel, number of takes, selection, and (by default) their events: name, start/end/length in seconds, muted.',
+  {
+    name: z.string().optional().describe('Only tracks whose name contains this'),
+    events: z.boolean().optional().describe('Include events (default true)'),
+    max_events: z.number().int().optional().describe('Per track (default 50)'),
+  },
+  guard(({ name, events, max_events }) => call('tracks', { name, events, maxEvents: max_events })),
+);
+
+server.tool(
+  'live_select_track',
+  'Select a track by exact name in the running Studio One, so that selection-based commands (live_command) act on it. Replaces the selection unless exclusive is false.',
+  { name: z.string(), exclusive: z.boolean().optional() },
+  guard((a) => call('selectTrack', a)),
+);
+
+server.tool(
+  'live_transport',
+  'Press a transport button in the running Studio One and return the resulting transport state.',
+  {
+    action: z.enum(['play', 'stop', 'record', 'togglePlay', 'returnToZero', 'rewind', 'forward', 'loopStart', 'loopEnd', 'toggleLoop', 'toggleClick', 'togglePrecount', 'togglePreroll', 'locateSelection']),
+  },
+  guard((a) => call('transport', a)),
+);
+
+server.tool(
+  'live_set_transport',
+  'Set transport values in the running Studio One: tempo (bpm), playhead position (seconds), loop / precount / preroll on or off. Returns the resulting transport state.',
+  {
+    tempo: z.number().optional(),
+    position_seconds: z.number().optional(),
+    loop: z.boolean().optional(),
+    precount: z.boolean().optional(),
+    preroll: z.boolean().optional(),
+  },
+  guard(({ position_seconds, ...a }) => call('setTransport', { ...a, positionSeconds: position_seconds })),
+);
+
+server.tool(
   'live_command',
   'Run any Studio One command by category and name, exactly as listed in Studio One → Keyboard Shortcuts (e.g. Transport/Start, Transport/Stop, Transport/Record, Edit/Undo, File/Save, View/Console). Use live_list_commands to discover names. With check_only, only reports whether the command is currently enabled, without running it.',
   {
@@ -122,7 +169,7 @@ server.tool(
 
 server.tool(
   'live_eval',
-  "Run JavaScript inside Studio One's script engine and return the result (host objects are described to a depth). Globals: Host, PreSonus, component, describe. Only works when the bridge was installed with --allow-eval. Useful for exploring the undocumented object model, e.g. Host.Objects.getObjectByUrl('://studioapp/DocumentManager').",
+  "Run JavaScript inside Studio One's script engine and return the result (host objects are described to a depth). Globals: Host, PreSonus, component, describe. Only works when the bridge was installed with --allow-eval. Useful for exploring the undocumented object model, e.g. Host.Objects.getObjectByUrl('://studioapp/DocumentManager'). Do not throw, and check that a host member exists (typeof) before calling it: either one pops a modal Scripting Error dialog in Studio One.",
   { code: z.string().describe('Function body; use `return` to send a value back'), depth: z.number().int().optional() },
   guard((a) => call('eval', a, { timeoutMs: 15000 })),
 );

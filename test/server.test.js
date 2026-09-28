@@ -53,7 +53,8 @@ async function call(name, args = {}) {
 test('exposes the song and live tools', async () => {
   const names = (await client.listTools()).tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
-    'live_channels', 'live_command', 'live_eval', 'live_list_commands', 'live_set_channel', 'live_status',
+    'live_channels', 'live_command', 'live_eval', 'live_list_commands', 'live_select_track', 'live_set_channel',
+    'live_set_transport', 'live_song', 'live_status', 'live_tracks', 'live_transport',
     'song_history', 'song_list', 'song_read',
   ]);
 });
