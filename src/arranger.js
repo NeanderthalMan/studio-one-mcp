@@ -6,6 +6,8 @@
 //    jump while the song plays, at the arranger's sync point. Stopped, they
 //    leave the playhead alone, so a stopped goto locates to the section's start
 //    from the last save instead.
+//    With a sync mode other than Off the jump waits; after a fresh start it did
+//    not come within 6 s, so set syncMode off for immediate jumps.
 //  - A goto has been seen to change the loop range to a section's range; it is
 //    put back afterwards.
 //  - Macro commands are named "Macro " + base64(title) in category "Macros".
@@ -71,7 +73,7 @@ export async function arranger(call, savedSections, { action, section, sync }) {
     }
     case 'createFromMarkers': {
       const r = await run('Create Sections from Markers');
-      return { executed: r.executed, note: 'New sections are not listed until the song is saved. live_undo removes them.' };
+      return { executed: r.executed, note: 'Shows the arranger track. New sections are not listed until the song is saved. One live_undo removes them.' };
     }
     default:
       throw new Error(`unknown action ${action}`);

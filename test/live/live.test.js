@@ -373,14 +373,19 @@ test('macros: listed by decoded title; one checked, not run', async (t) => {
   assert.equal(typeof r.enabled, 'boolean');
 });
 
+// Seen on 5.5.2: Create Sections from Markers is one undo step and also shows the
+// arranger track; play, stop, jumps and the sync mode are not undo steps. The sync
+// mode cannot be read, so this test leaves it at Off (a fresh start had it at a
+// setting where the jump never came within 6 s). "Create Markers from Sections" is
+// enabled exactly while the arranger track is shown, not while sections exist.
 test('arranger: sections from markers, jump while playing, all restored', async () => {
   const song0 = await call('song');
   const t0 = song0.transport;
   assert.equal(t0.playing, false, 'start the live suite with Studio One stopped');
   const markers0 = (await call('markers')).markers.map((m) => m.seconds);
   for (const s of [4, 8]) assert.ok(!markers0.includes(s), `no marker at ${s}s already`);
-  const hasSections = async () => (await call('command', { category: 'Arranger', name: 'Create Markers from Sections', checkOnly: true })).enabled;
-  const sections0 = await hasSections();
+  const arrangerShown = async () => (await call('command', { category: 'Arranger', name: 'Create Markers from Sections', checkOnly: true })).enabled;
+  const shown0 = await arrangerShown();
   await assert.rejects(arranger(call, () => [], { action: 'next' }), /while playing/);
   await call('addMarker', { seconds: 4 });
   await call('addMarker', { seconds: 8 });
@@ -388,12 +393,12 @@ test('arranger: sections from markers, jump while playing, all restored', async 
   try {
     created = (await arranger(call, () => [], { action: 'createFromMarkers' })).executed;
     assert.equal(created, true);
+    assert.equal((await arranger(call, () => [], { action: 'syncMode', sync: 'off' })).executed, true);
     await call('setTransport', { positionSeconds: 0 });
     await call('transport', { action: 'play' });
     await arranger(call, () => [], { action: 'goto', section: 3 });
-    // The jump waits for the arranger's sync point (up to the end of the 4 s section).
     let pos = 0;
-    for (let i = 0; i < 60 && !(pos >= 8 && pos < 12); i++) {
+    for (let i = 0; i < 30 && !(pos >= 8 && pos < 12); i++) {
       await new Promise((r) => setTimeout(r, 100));
       pos = (await call('song')).transport.position.seconds;
     }
@@ -407,9 +412,10 @@ test('arranger: sections from markers, jump while playing, all restored', async 
     await call('setLoop', { start: t0.loopRange.start.seconds, end: t0.loopRange.end.seconds, enable: t0.loop });
     await call('setTransport', { positionSeconds: t0.position.seconds });
     for (const [i, name] of song0.selectedTracks.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+    if ((await arrangerShown()) !== shown0) await call('command', { category: 'View', name: 'Open Arranger Track' });
   }
   assert.deepEqual((await call('markers')).markers.map((m) => m.seconds), markers0);
-  assert.equal(await hasSections(), sections0, 'sections as they were');
+  assert.equal(await arrangerShown(), shown0, 'arranger track shown/hidden as before');
 });
 
 test('sends: set a level and restore it', async (t) => {
