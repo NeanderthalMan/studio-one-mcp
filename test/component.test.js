@@ -102,3 +102,12 @@ test('onExit closes the bridge', () => {
   assert.equal(host.client.read('status.json').closed, true);
   assert.equal(component.bridge, null);
 });
+
+test('meters: left/right peak dB per channel', () => {
+  const { ring, mixer } = setup();
+  mixer.elements[0].params.level1 = -12.5;
+  mixer.elements[0].params.level2 = -13;
+  const m = plain(ring('meters').result);
+  assert.deepEqual(m[0], { label: 'Vox', left: -12.5, right: -13 });
+  assert.deepEqual(m.map((c) => c.label), ['Vox', 'Bass', 'Main L/R']);
+});

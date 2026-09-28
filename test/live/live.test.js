@@ -203,3 +203,102 @@ test('selectEvents + Event/Mute Events + Unmute: events toggled and restored', a
   const after = (await call('tracks', { name: target.name })).find((x) => x.name === target.name);
   assert.ok(after.events.every((e) => !e.muted), 'unmuted again');
 });
+
+// ---- loop, takes, undo, track state, event edits, add track, meters ----------------
+
+const uniqueNamed = async (pred = () => true) => {
+  const tracks = await call('tracks');
+  const names = tracks.map((x) => x.name);
+  return tracks.find((x) => names.indexOf(x.name) === names.lastIndexOf(x.name) && pred(x));
+};
+
+test('setLoop in bars and seconds, restored', async () => {
+  const t0 = (await call('song')).transport;
+  try {
+    const t1 = await call('setLoop', { start: '3.1.1.0', end: '5.1.1.0' });
+    assert.equal(t1.loopRange.start.display.startsWith('0003.01.01'), true);
+    assert.equal(t1.loopRange.end.display.startsWith('0005.01.01'), true);
+    await assert.rejects(call('setLoop', { start: 'soon' }), /bars like/);
+  } finally {
+    const back = await call('setLoop', { start: t0.loopRange.start.seconds, end: t0.loopRange.end.seconds, enable: t0.loop });
+    assert.deepEqual([back.loopRange.start.seconds, back.loopRange.end.seconds, back.loop], [t0.loopRange.start.seconds, t0.loopRange.end.seconds, t0.loop]);
+  }
+});
+
+test('setTransport position in bars', async () => {
+  const t0 = (await call('song')).transport;
+  try {
+    assert.ok((await call('setTransport', { positionBars: '2.1.1.0' })).position.display.startsWith('0002.01.01'));
+  } finally {
+    await call('setTransport', { positionSeconds: t0.position.seconds });
+  }
+});
+
+test('takes: next then previous restores the active take', async (t) => {
+  const track = await uniqueNamed((x) => x.takes > 1);
+  if (!track) return t.skip('no track with more than one take');
+  // Layers do not wrap: on the last take "next" is a no-op, so step whichever way moves.
+  const list = await call('takes', { track: track.name });
+  const same = (r) => r.activeEvents.join() === list.activeEvents.join();
+  let [dir, back] = ['next', 'previous'];
+  let moved = await call('takes', { track: track.name, action: dir });
+  if (same(moved)) {
+    [dir, back] = [back, dir];
+    moved = await call('takes', { track: track.name, action: dir });
+  }
+  try {
+    assert.ok(!same(moved), 'a different take is playing');
+  } finally {
+    if (!same(moved)) assert.ok(same(await call('takes', { track: track.name, action: back })), 'original take restored');
+  }
+});
+
+// Mute is not on Studio One's undo stack: an undo here reverts the edit before it (it
+// once flipped the take the test above had just restored). Toggle back instead.
+test('trackState mute toggles the channel, and toggling again restores it', async () => {
+  const track = await uniqueNamed();
+  const muteOf = async () => (await call('channels')).find((c) => c.label === track.channel).mute;
+  const before = await muteOf();
+  const r = await call('trackState', { track: track.name, action: 'mute' });
+  try {
+    assert.equal(r.channel.mute, before ? 0 : 1);
+  } finally {
+    if ((await muteOf()) !== before) await call('trackState', { track: track.name, action: 'mute' });
+  }
+  assert.equal(await muteOf(), before);
+});
+
+test('editEvents split, then undo restores the events', async (t) => {
+  const track = await uniqueNamed((x) => x.events.some((e) => e.end - e.start > 2));
+  if (!track) return t.skip('no track with an event longer than 2 s');
+  const ev = track.events.find((e) => e.end - e.start > 2);
+  const r = await call('editEvents', { track: track.name, action: 'split', at: ev.start + 1 });
+  try {
+    assert.equal(r.events.length, track.events.length + 1, 'one more event after the split');
+  } finally {
+    await call('undo', {});
+  }
+  assert.equal((await call('tracks', { name: track.name })).find((x) => x.name === track.name).eventCount, track.eventCount);
+});
+
+test('addTrack, then undo removes it', async () => {
+  const n0 = (await call('song')).trackCount;
+  const r = await call('addTrack', { type: 'audioMono' });
+  try {
+    assert.equal(r.trackCount, n0 + 1);
+  } finally {
+    await call('undo', {});
+  }
+  assert.equal((await call('song')).trackCount, n0);
+});
+
+test('meters: a dB reading for every channel', async () => {
+  const m = await call('meters');
+  assert.equal(m.length, channels.length);
+  for (const c of m) assert.ok(typeof c.left === 'number' && c.left <= 12 && c.left >= -200, `${c.label}: ${c.left}`);
+});
+
+test('save is available (checked, not run)', async () => {
+  assert.equal(typeof (await call('command', { category: 'File', name: 'Save', checkOnly: true })).enabled, 'boolean');
+  assert.equal(typeof (await call('command', { category: 'File', name: 'Save New Version', checkOnly: true })).enabled, 'boolean');
+});

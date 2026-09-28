@@ -145,11 +145,12 @@ server.tool(
   {
     tempo: z.number().optional(),
     position_seconds: z.number().optional(),
+    position_bars: z.string().optional().describe('Bar position like "9.1.1.0" (bar.beat.sixteenth.tick); alternative to position_seconds'),
     loop: z.boolean().optional(),
     precount: z.boolean().optional(),
     preroll: z.boolean().optional(),
   },
-  guard(({ position_seconds, ...a }) => call('setTransport', { ...a, positionSeconds: position_seconds })),
+  guard(({ position_seconds, position_bars, ...a }) => call('setTransport', { ...a, positionSeconds: position_seconds, positionBars: position_bars })),
 );
 
 // Marker names are not exposed live; take them from the last save by position.
@@ -202,6 +203,86 @@ server.tool(
     none: z.boolean().optional().describe('Deselect all events'),
   },
   guard((a) => call('selectEvents', a)),
+);
+
+const TIME = z.union([z.number(), z.string()]).describe('Seconds (number) or a bar position string like "9.1.1.0"');
+
+server.tool(
+  'live_set_loop',
+  'Set the loop range in the running Studio One (start/end in seconds or as bars like "9.1.1.0"), and optionally turn looping on or off. Returns the transport state.',
+  { start: TIME.optional(), end: TIME.optional(), enable: z.boolean().optional() },
+  guard((a) => call('setLoop', a)),
+);
+
+server.tool(
+  'live_takes',
+  "A track's takes (layers) in the running Studio One: list them, switch to the next/previous take, or unpack all takes to separate tracks. Returns the number of takes and the names of the clips now playing. Takes do not wrap: next on the last take (or previous on the first) changes nothing.",
+  { track: z.string(), action: z.enum(['list', 'next', 'previous', 'unpack']).optional() },
+  guard((a) => call('takes', a)),
+);
+
+server.tool(
+  'live_save',
+  'Save the song open in Studio One (File/Save), or save it as a new version (File/Save New Version) to keep the old one.',
+  { new_version: z.boolean().optional() },
+  guard(({ new_version }) => call('save', { newVersion: !!new_version })),
+);
+
+server.tool(
+  'live_undo',
+  'Undo the last edit(s) in the running Studio One.',
+  { steps: z.number().int().optional() },
+  guard((a) => call('undo', a)),
+);
+
+server.tool(
+  'live_redo',
+  'Redo edit(s) in the running Studio One.',
+  { steps: z.number().int().optional() },
+  guard((a) => call('redo', a)),
+);
+
+server.tool(
+  'live_track_state',
+  "Toggle a track's arm / monitor / mute / solo, hide it, or duplicate it, by track name; showAll unhides every track. Returns the track's mixer channel afterwards. The track selection is restored. Mute is not on Studio One's undo stack: revert it by toggling again, since live_undo would undo the edit before it.",
+  { track: z.string().optional(), action: z.enum(['arm', 'monitor', 'mute', 'solo', 'hide', 'duplicate', 'showAll']) },
+  guard((a) => call('trackState', a)),
+);
+
+server.tool(
+  'live_edit_events',
+  'Edit all events on one track in the running Studio One: mute, unmute, toggleMute, quantize, transposeUp/Down (instrument parts), split / trimStart / trimEnd at a time (seconds or bars), merge, delete. Returns the track\'s events afterwards. Use live_undo to revert.',
+  {
+    track: z.string(),
+    action: z.enum(['mute', 'unmute', 'toggleMute', 'quantize', 'transposeUp', 'transposeDown', 'split', 'trimStart', 'trimEnd', 'merge', 'delete']),
+    at: TIME.optional().describe('Required for split, trimStart, trimEnd'),
+  },
+  guard((a) => call('editEvents', a)),
+);
+
+server.tool(
+  'live_add_track',
+  'Add a track to the song open in Studio One: audioMono (default), audioStereo, instrument, folder or automation.',
+  { type: z.enum(['audioMono', 'audioStereo', 'instrument', 'folder', 'automation']).optional() },
+  guard((a) => call('addTrack', a)),
+);
+
+server.tool(
+  'live_meters',
+  'Peak meters of every mixer channel in dB (-144 = silence). With duration_ms, samples repeatedly (e.g. while playing) and returns the highest peak per channel, plus which channels clipped (above -0.1 dB).',
+  { duration_ms: z.number().int().optional() },
+  guard(async ({ duration_ms }) => {
+    const first = await call('meters');
+    if (!duration_ms) return first;
+    const peak = new Map(first.map((m) => [m.label, Math.max(m.left ?? -144, m.right ?? -144)]));
+    const until = Date.now() + Math.min(duration_ms, 60000);
+    while (Date.now() < until) {
+      for (const m of await call('meters')) peak.set(m.label, Math.max(peak.get(m.label) ?? -144, m.left ?? -144, m.right ?? -144));
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const channels = [...peak].map(([label, db]) => ({ label, peakDb: Math.round(db * 10) / 10 }));
+    return { durationMs: duration_ms, channels, clipped: channels.filter((c) => c.peakDb > -0.1).map((c) => c.label) };
+  }),
 );
 
 server.tool(

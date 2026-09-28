@@ -76,6 +76,13 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         }));
     }
 
+    // Peak meter per channel in dB (-144 is silence), both sides of a stereo strip.
+    meters() {
+        const els = this.channelElements();
+        if (els.error) return els;
+        return els.map(c => ({ label: c.label, left: this.readParam(c.el, "level1"), right: this.readParam(c.el, "level2") }));
+    }
+
     setChannel(args) {
         const fields = { volume: PreSonus.ParamID.kVolume, pan: PreSonus.ParamID.kPan, mute: "mute", solo: "solo", recordArmed: PreSonus.ParamID.kRecord };
         const param = fields[args.field];

@@ -14,10 +14,13 @@ export const MAILBOX = 'file:///mailbox/';
 // parameters (tempo in bpm, times in seconds with a display string) and a
 // mainTrackList whose tracks with takes appear once per lane (same object).
 export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } = {}) {
+  // Bar strings like "9.1.1.0" at 120 bpm in 4/4: two seconds per bar.
+  const fromBars = (str) => { const [bar, beat = 1] = str.split('.').map(Number); return (bar - 1) * 2 + (beat - 1) * 0.5; };
   const param = (name, value, { min = 0, max = 1, display } = {}) => ({
     name, value, min, max,
     get string() { return display ? display(this.value) : String(this.value); },
     setValue(v) { this.value = v; },
+    fromString(str) { this.value = fromBars(str); },
   });
   const bars = (sec) => `${String(Math.floor(sec / 2) + 1).padStart(4, '0')}.01.01.00`; // 120 bpm, 4/4
   const params = {
@@ -30,17 +33,27 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
     loopEnd: param('loopEnd', 16, { display: bars }),
   };
   const transportPanel = { findParameter: (n) => params[n] || null };
-  const objs = tracks.map((t, i) => ({
-    name: t.name, mediaType: t.mediaType || 'Audio', color: t.color ?? 0xffc693, trackIndex: i + 1,
-    channel: { label: t.channel || t.name }, layers: { count: t.takes || 1 },
-    isEmpty: () => !(t.events || []).length,
-    createIterator: () => {
-      const evs = (t.events || []).map((e) => ({ name: e.name, startTime: { seconds: e.start }, endTime: { seconds: e.end }, isMuted: e.muted ? 1 : 0 }));
-      let k = 0;
-      return { next: () => evs[k++] || null };
-    },
-  }));
-  const rows = objs.flatMap((o, i) => Array((tracks[i].takes || 1) > 1 ? 2 + tracks[i].takes : 1).fill(o));
+  // takeEvents: one events array per take; `events` is shorthand for a single take.
+  const makeTrack = (t, i) => {
+    const takes = (t.takeEvents || [t.events || []]).map((list) => list.map((e) => ({ ...e })));
+    const o = {
+      name: t.name, mediaType: t.mediaType || 'Audio', color: t.color ?? 0xffc693, trackIndex: i + 1,
+      channel: { label: t.channel || t.name }, layers: { count: t.takes || takes.length },
+      activeTake: 0,
+      currentEvents: () => takes[o.activeTake] || [],
+      isEmpty: () => !o.currentEvents().length,
+      createIterator: () => {
+        const evs = o.currentEvents().map((e) => ({ name: e.name, startTime: { seconds: e.start }, endTime: { seconds: e.end }, isMuted: e.muted ? 1 : 0 }));
+        let k = 0;
+        return { next: () => evs[k++] || null };
+      },
+    };
+    return o;
+  };
+  const objs = tracks.map(makeTrack);
+  let rows = [];
+  const layout = () => (rows = objs.flatMap((o) => Array(o.layers.count > 1 ? 2 + o.layers.count : 1).fill(o)));
+  layout();
   let selected = [];
   const mainTrackList = {
     get numTracks() { return rows.length; },
@@ -51,7 +64,9 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
     unselectAll: () => { selected = []; },
   };
   return {
-    params, objs, rows, mainTrackList,
+    params, objs, mainTrackList,
+    addTrack: (name) => { objs.push(makeTrack({ name }, objs.length)); layout(); },
+    removeTrack: (name) => { const k = objs.findIndex((o) => o.name === name); if (k >= 0) objs.splice(k, 1); layout(); },
     urls: {
       '://studioapp/DocumentManager': { activeDocument: { title, path: { url: `file:///songs/${title}/${title}.song` } } },
       '://hostapp/DocumentManager/ActiveDocument/Environment/TransportPanel': transportPanel,
