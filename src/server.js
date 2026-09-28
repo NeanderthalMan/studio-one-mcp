@@ -442,7 +442,7 @@ server.tool(
 
 server.tool(
   'live_tempo',
-  "Tempo map of the running Studio One (stopped). at: tempo at one or more positions. set: change the tempo of the segment containing a position (default: the playhead). insert: add a tempo change at a position with its bpm. Removing one needs live_undo (usually two steps), and Studio One has refused an undo right after a tempo edit, so check with "at" afterwards; setting a segment back is exact. Positions are seconds or bars like \"9.1.1.0\"; the playhead is put back. For the whole saved map, and time signatures, use song_read.",
+  "Tempo map of the running Studio One (stopped). at: tempo at one or more positions. set: change the tempo of the segment containing a position (default: the playhead). insert: add a tempo change at a position with its bpm. Removing one needs live_undo (usually two steps), and Studio One has refused an undo right after a tempo edit, so check with action at afterwards; setting a segment back is exact. Positions are seconds or bars like \"9.1.1.0\"; the playhead is put back. For the whole saved map, and time signatures, use song_read.",
   {
     action: z.enum(['at', 'set', 'insert']),
     at: z.union([TIME, z.array(TIME)]).optional(),
