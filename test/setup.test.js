@@ -1,0 +1,111 @@
+// The installer pieces: device status, MIDI port choice, MCP client registration,
+// the doctor report and the CLI.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { installDevice, deviceStatus, deviceTarget, fileUrl, readDeviceConfig } from '../src/setup/device.js';
+import { pickMidiPort, serverEntry, claudeCodeAddArgs, mergeDesktopConfig, readDesktopConfig, serverPath } from '../src/setup/checks.js';
+import { formatReport } from '../src/setup/doctor.js';
+
+const tmp = (p) => mkdtempSync(join(tmpdir(), p));
+
+test('fileUrl keeps spaces unencoded, like Studio One does', () => {
+  assert.equal(fileUrl('/Users/me/Library/Application Support/x'), 'file:///Users/me/Library/Application Support/x');
+  assert.equal(fileUrl('C:\\Users\\me\\AppData'), 'file:///C:/Users/me/AppData');
+});
+
+test('deviceStatus: not installed → installed and current → stale after a change', () => {
+  const profile = tmp('s1prof-');
+  assert.deepEqual(deviceStatus(profile), { installed: false, current: false, config: null });
+  installDevice({ profile, allowEval: true, mailbox: join(profile, 'mb') });
+  const ok = deviceStatus(profile);
+  assert.deepEqual([ok.installed, ok.current, ok.config.allowEval], [true, true, true]);
+  writeFileSync(join(deviceTarget(profile), 'BridgeCore.js'), '// old version\n');
+  const stale = deviceStatus(profile);
+  assert.deepEqual([stale.installed, stale.current, stale.stale], [true, false, ['BridgeCore.js']]);
+  assert.equal(readDeviceConfig(profile).mailbox, fileUrl(join(profile, 'mb')) + '/');
+});
+
+test('pickMidiPort: IAC first, then loopMIDI / studio-one-mcp, or an explicit name', () => {
+  assert.equal(pickMidiPort(['Casio', 'IAC Driver Bus 1']), 'IAC Driver Bus 1');
+  assert.equal(pickMidiPort(['Casio', 'loopMIDI Port']), 'loopMIDI Port');
+  assert.equal(pickMidiPort(['studio-one-mcp 1']), 'studio-one-mcp 1');
+  assert.equal(pickMidiPort(['Casio']), null);
+  assert.equal(pickMidiPort(['IAC Driver Bus 1', 'My Bus'], 'my bus'), 'My Bus');
+  assert.equal(pickMidiPort(['IAC Driver Bus 1'], 'nothing'), null);
+});
+
+test('serverEntry: node + absolute server path; MIDI port env only when not IAC', () => {
+  assert.deepEqual(serverEntry({ midiPort: 'IAC Driver Bus 1' }), { command: process.execPath, args: [serverPath] });
+  assert.deepEqual(serverEntry({ midiPort: 'loopMIDI Port' }).env, { STUDIO_ONE_MCP_MIDI_PORT: 'loopMIDI Port' });
+  assert.ok(existsSync(serverPath));
+});
+
+test('claude mcp add arguments: user scope, env, then the command', () => {
+  assert.deepEqual(claudeCodeAddArgs({ command: '/bin/node', args: ['/x/server.js'], env: { A: '1' } }), [
+    'mcp', 'add', '-s', 'user', '-e', 'A=1', 'studio-one', '--', '/bin/node', '/x/server.js',
+  ]);
+});
+
+test('Claude Desktop config: creates, merges without touching other servers, backs up', () => {
+  const dir = tmp('s1desk-');
+  const path = join(dir, 'Claude', 'claude_desktop_config.json');
+  const first = mergeDesktopConfig({ command: 'node', args: ['a'] }, { path });
+  assert.equal(first.backup, null, 'nothing to back up yet');
+  writeFileSync(path, JSON.stringify({ theme: 'dark', mcpServers: { other: { command: 'x' } } }));
+  const second = mergeDesktopConfig({ command: 'node', args: ['b'] }, { path });
+  const cfg = JSON.parse(readFileSync(path, 'utf8'));
+  assert.deepEqual(cfg, { theme: 'dark', mcpServers: { other: { command: 'x' }, 'studio-one': { command: 'node', args: ['b'] } } });
+  assert.ok(existsSync(second.backup));
+  assert.equal(readdirSync(join(dir, 'Claude')).filter((f) => f.includes('.bak-')).length, 1);
+});
+
+test('Claude Desktop config that is not JSON is left alone', () => {
+  const path = join(tmp('s1bad-'), 'claude_desktop_config.json');
+  writeFileSync(path, '{ not json');
+  assert.match(readDesktopConfig(path).error, /not valid JSON/);
+  assert.throws(() => mergeDesktopConfig({ command: 'node', args: [] }, { path }), /fix or remove it first/);
+  assert.equal(readFileSync(path, 'utf8'), '{ not json');
+});
+
+test('doctor report: icons, fixes under failures, summary', () => {
+  const out = formatReport([
+    { name: 'Node.js', status: 'pass', detail: '24' },
+    { name: 'Virtual MIDI port', status: 'fail', detail: 'none', fix: 'Turn on IAC' },
+    { name: 'Claude Desktop', status: 'info', detail: 'not registered' },
+  ]);
+  assert.match(out, /✔ Node\.js/);
+  assert.match(out, /✖ Virtual MIDI port\s+none\n\s+→ Turn on IAC/);
+  assert.match(out, /1 problem\(s\) found\./);
+  assert.match(formatReport([{ name: 'a', status: 'pass', detail: '' }]), /All good\./);
+});
+
+const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+const run = (args, env = {}) => {
+  try {
+    return { code: 0, out: execFileSync(process.execPath, [cli, ...args], { encoding: 'utf8', env: { ...process.env, ...env }, stdio: 'pipe' }) };
+  } catch (e) {
+    return { code: e.status, out: String(e.stdout) + String(e.stderr) };
+  }
+};
+
+test('cli: help, unknown command, doctor on an empty profile', () => {
+  assert.match(run(['help']).out, /studio-one-mcp setup/);
+  assert.equal(run(['bogus']).code, 1);
+  const profile = tmp('s1doc-');
+  const r = run(['doctor', '--profile', profile], { STUDIO_ONE_MCP_HOME: tmp('s1home-') });
+  assert.match(r.out, /Bridge device installed\s+not installed/);
+  assert.equal(r.code, 1);
+});
+
+test('cli: setup --dry-run --yes changes nothing', () => {
+  const profile = tmp('s1dry-');
+  mkdirSync(profile, { recursive: true });
+  const r = run(['setup', '--dry-run', '--yes', '--profile', profile], { STUDIO_ONE_MCP_HOME: tmp('s1home-') });
+  assert.match(r.out, /would install the device/);
+  assert.equal(existsSync(deviceTarget(profile)), false);
+});
