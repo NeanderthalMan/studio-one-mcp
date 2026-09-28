@@ -47,14 +47,14 @@ test('setInsertBypass: one slot, or the whole rack', () => {
 
 test('sends: listed per channel; channels without sends omitted unless asked', () => {
   const { ring } = setup();
-  assert.deepEqual(plain(ring('sends', {}).result), [{ channel: 'Vox', sends: [{ index: 0, to: 'Reverb', level: 0.3, muted: false }] }]);
+  assert.deepEqual(plain(ring('sends', {}).result), [{ channel: 'Vox', sends: [{ index: 0, to: 'Reverb', level: 0.3, levelDb: '-10.5', muted: false }] }]);
   assert.deepEqual(plain(ring('sends', { channel: 'Bass' }).result), [{ channel: 'Bass', sends: [] }]);
 });
 
 test('setSend: level and mute; validation', () => {
   const { ring, mixer } = setup();
   const r = plain(ring('setSend', { channel: 'Vox', index: 0, level: 0.8, muted: true }).result);
-  assert.deepEqual(r.send, { index: 0, to: 'Reverb', level: 0.8, muted: true });
+  assert.deepEqual(r.send, { index: 0, to: 'Reverb', level: 0.8, levelDb: '-1.9', muted: true });
   assert.equal(mixer.elements[0].banks.sends.els[0].params.sendlevel, 0.8);
   assert.match(ring('setSend', { channel: 'Vox', index: 0, level: 2 }).error, /level must be 0..1/);
   assert.match(ring('setSend', { channel: 'Vox', index: 3, level: 0.1 }).error, /no send 3/);

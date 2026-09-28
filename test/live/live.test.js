@@ -329,6 +329,8 @@ test('sends: set a level and restore it', async (t) => {
   const withSend = (await call('sends', {})).find((c) => c.sends.length);
   if (!withSend) return t.skip('no channel has a send');
   const s = withSend.sends[0];
+  assert.equal(typeof s.to, 'string', 'destination is a name (display text), not a list index');
+  assert.notEqual(s.to, '-1');
   try {
     assert.equal((await call('setSend', { channel: withSend.channel, index: s.index, level: s.level > 0.5 ? 0.25 : 0.75 })).send.level > 0, true);
   } finally {

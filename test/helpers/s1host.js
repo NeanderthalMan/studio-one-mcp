@@ -139,7 +139,12 @@ export function fakeMixer(channels) {
   const bankOf = (items, paramsOf) => {
     const els = items.map((it) => {
       const p = paramsOf(it);
-      return { params: p, isConnected: () => true, getParamValue: (id) => p[id], setParamValue: (id, v) => ((p[id] = v), true) };
+      const display = { sendPort: () => it.to, sendlevel: () => `${(20 * Math.log10(Math.max(p.sendlevel, 1e-6))).toFixed(1)}` };
+      return {
+        params: p, isConnected: () => true, getParamValue: (id) => p[id], setParamValue: (id, v) => ((p[id] = v), true),
+        // Real sendPort values are list indexes (-1 for the default bus); the name is only display text.
+        connectAliasParam: (alias, id) => (alias.string = display[id] ? display[id]() : String(p[id])),
+      };
     });
     return { getElement: (i) => els[i] || null, els };
   };
@@ -148,7 +153,7 @@ export function fakeMixer(channels) {
     (c.inserts || []).forEach((x, i) => (params[`Inserts/[${i}]/@bypass`] = x.bypassed ? 1 : 0));
     const banks = {
       inserts: bankOf(c.inserts || [], (x) => ({ '@owner/deviceName': x.name })),
-      sends: bankOf(c.sends || [], (x) => ({ sendPort: x.to, sendlevel: x.level ?? 0.5, sendMute: x.muted ? 1 : 0 })),
+      sends: bankOf(c.sends || [], (x) => ({ sendPort: -1, sendlevel: x.level ?? 0.5, sendMute: x.muted ? 1 : 0 })),
     };
     return {
       params,
@@ -204,7 +209,10 @@ export function loadComponent({ host, config, mixer }) {
   const params = [];
   const hostComponent = {
     model: mixer ? mixer.model : undefined,
-    paramList: { addParam: (name) => (params.push({ name }), params[params.length - 1]) },
+    paramList: {
+      addParam: (name) => (params.push({ name }), params[params.length - 1]),
+      addAlias: (name) => ({ name, string: '' }),
+    },
   };
   const component = vm.runInContext('createBridgeComponent()', ctx);
   component.onInit(hostComponent);

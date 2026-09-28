@@ -9,6 +9,11 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
     onInit(hostComponent) {
         super.onInit(hostComponent);
         this.tickParam = hostComponent.paramList.addParam("bridgeTick");
+        // An alias parameter can be pointed at any element's parameter to read
+        // its display text (a send's destination name, a level in dB), the way
+        // the FaderPort script fills its scribble strips.
+        this.displayAlias = typeof hostComponent.paramList.addAlias === "function"
+            ? hostComponent.paramList.addAlias("bridgeDisplay") : null;
         this.bridge = null;
         try {
             const cfg = bridgeConfig();
@@ -145,6 +150,13 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         return { channel: args.channel, slot: args.slot, before: !!before, after: !!this.readParam(c.el, param) };
     }
 
+    displayOf(el, paramName) {
+        const a = this.displayAlias;
+        if (!a || !el || typeof el.connectAliasParam !== "function") return null;
+        el.connectAliasParam(a, paramName);
+        return typeof a.string === "string" ? a.string : null;
+    }
+
     sendsOf(el) {
         const bank = this.subBank(el, "sends");
         const out = [];
@@ -152,9 +164,14 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         for (let i = 0; i < 8; i++) {
             const send = bank.getElement(i);
             if (!send || typeof send.isConnected !== "function" || !send.isConnected()) continue;
-            const port = this.readParam(send, PreSonus.ParamID.kSendPort);
-            if (port === null || String(port) === "") continue;
-            out.push({ index: i, to: String(port), level: this.readParam(send, PreSonus.ParamID.kSendLevel), muted: !!this.readParam(send, PreSonus.ParamID.kSendMute) });
+            if (this.readParam(send, PreSonus.ParamID.kSendPort) === null) continue;
+            out.push({
+                index: i,
+                to: this.displayOf(send, PreSonus.ParamID.kSendPort),
+                level: this.readParam(send, PreSonus.ParamID.kSendLevel),
+                levelDb: this.displayOf(send, PreSonus.ParamID.kSendLevel),
+                muted: !!this.readParam(send, PreSonus.ParamID.kSendMute),
+            });
         }
         return out;
     }
