@@ -12,7 +12,7 @@ import { bridgeStatus, call } from '../../src/bridge.js';
 import { pluginParamNames } from '../../src/plugins.js';
 import { arranger, listMacros, runMacro } from '../../src/arranger.js';
 import { tempo } from '../../src/tempo.js';
-import { trackEdit } from '../../src/tracks.js';
+import { trackEdit, addBus } from '../../src/tracks.js';
 import { readSong } from '../../src/song.js';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync } from 'node:fs';
@@ -495,6 +495,38 @@ test('plug-in snapshot: save, change a parameter, restore brings it back', async
   }
   const back = (await call('pluginParams', { ...at, names: [p.name] })).params[0];
   assert.equal(back.value, p.value);
+});
+
+test('routing and monitor: output names on tracks; monitor set and restored', async () => {
+  const now = await call('channels');
+  const tracksWithOut = now.filter((c) => typeof c.output === 'string' && c.output !== '');
+  assert.ok(tracksWithOut.length > 0, 'some channels report an output name');
+  for (const c of tracksWithOut) assert.notEqual(c.output, '-1', `${c.label}: a name, not a list index`);
+  const ch = now.find((c) => c.label === testChannel.label);
+  if (ch.monitor === null) return;
+  try {
+    assert.equal((await call('setChannel', { channel: ch.label, field: 'monitor', value: ch.monitor ? 0 : 1 })).after, ch.monitor ? 0 : 1);
+  } finally {
+    assert.equal((await call('setChannel', { channel: ch.label, field: 'monitor', value: ch.monitor })).after, ch.monitor);
+  }
+});
+
+// One undo step (checked by hand twice); the result is verified, not assumed.
+test('add a bus for one track, then undo removes it and restores the routing', async () => {
+  const track = await uniqueNamed((x) => x.channel && x.mediaType === 'Audio');
+  const chans0 = await call('channels');
+  const out0 = chans0.find((c) => c.label === track.channel).output;
+  const r = await addBus(call, { tracks: [track.name] });
+  try {
+    assert.equal(r.added.length, 1, `one new channel: ${r.added}`);
+    assert.equal(r.routed[0].output, r.added[0], 'the track now goes to the new bus');
+  } finally {
+    await call('undo', {});
+    for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  }
+  const chans1 = await call('channels');
+  assert.deepEqual(chans1.map((c) => c.label), chans0.map((c) => c.label), 'the bus is gone');
+  assert.equal(chans1.find((c) => c.label === track.channel).output, out0);
 });
 
 // Record modes are not exercised: they cannot be read, so they could not be restored.

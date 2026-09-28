@@ -81,6 +81,11 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
             solo: this.readParam(c.el, "solo"),
             recordArmed: this.readParam(c.el, PreSonus.ParamID.kRecord),
             automation: AUTOMATION_MODES[this.readParam(c.el, PreSonus.ParamID.kAutoMode)] || null,
+            monitor: this.readParam(c.el, "monitor"),
+            // Routing is a list index (-1) whose names are only display text, like
+            // sendPort. Read-only: fromString with a name did not change it (5.5.2).
+            input: this.readParam(c.el, "recordPort") === null ? null : this.displayOf(c.el, "recordPort"),
+            output: this.readParam(c.el, "outputPort") === null ? null : this.displayOf(c.el, "outputPort"),
         }));
     }
 
@@ -315,7 +320,7 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
     }
 
     setChannel(args) {
-        const fields = { volume: PreSonus.ParamID.kVolume, pan: PreSonus.ParamID.kPan, mute: "mute", solo: "solo", recordArmed: PreSonus.ParamID.kRecord };
+        const fields = { volume: PreSonus.ParamID.kVolume, pan: PreSonus.ParamID.kPan, mute: "mute", solo: "solo", recordArmed: PreSonus.ParamID.kRecord, monitor: "monitor" };
         const param = fields[args.field];
         if (!param) return { error: "field must be one of " + Object.keys(fields).join(", ") };
         const els = this.channelElements();

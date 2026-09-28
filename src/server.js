@@ -17,7 +17,7 @@ import { midiPort } from './midi.js';
 import { pluginParamNames } from './plugins.js';
 import { arranger, listMacros, runMacro } from './arranger.js';
 import { tempo } from './tempo.js';
-import { trackEdit } from './tracks.js';
+import { trackEdit, addBus } from './tracks.js';
 import { recordSetup } from './record.js';
 import { snapshot } from './snapshots.js';
 import { bounce } from './bounce.js';
@@ -116,17 +116,17 @@ server.tool(
 
 server.tool(
   'live_channels',
-  'List the mixer channels of the song open in Studio One right now, with live volume, pan, mute, solo, record-arm and automation mode.',
+  'List the mixer channels of the song open in Studio One right now, with live volume, pan, mute, solo, record-arm, input monitoring, automation mode, and routing (input and output names; read-only).',
   {},
   guard(() => call('channels')),
 );
 
 server.tool(
   'live_set_channel',
-  'Change one mixer channel in the running Studio One. Values are Studio One normalised values (volume/pan 0..1, pan 0.5 = centre; mute/solo/recordArmed 0 or 1). Returns before/after.',
+  'Change one mixer channel in the running Studio One. Values are Studio One normalised values (volume/pan 0..1, pan 0.5 = centre; mute/solo/recordArmed/monitor 0 or 1). Returns before/after.',
   {
     channel: z.string().describe('Exact channel label as shown in the console'),
-    field: z.enum(['volume', 'pan', 'mute', 'solo', 'recordArmed']),
+    field: z.enum(['volume', 'pan', 'mute', 'solo', 'recordArmed', 'monitor']),
     value: z.number(),
   },
   guard((a) => call('setChannel', a)),
@@ -514,6 +514,13 @@ server.tool(
     noteErase: z.boolean().optional(),
   },
   guard((a) => recordSetup(call, a)),
+);
+
+server.tool(
+  'live_add_bus',
+  'Create a bus for some tracks (their outputs are routed into it) or a VCA that controls them, in the running Studio One. Returns the new channel and, for a bus, where each track now goes. One live_undo removes it. The track selection is kept.',
+  { tracks: z.array(z.string()).describe('Exact track names'), kind: z.enum(['bus', 'vca']).optional() },
+  guard((a) => addBus(call, a)),
 );
 
 server.tool(

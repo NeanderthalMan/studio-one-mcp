@@ -188,7 +188,11 @@ export function fakeMixer(channels) {
     return { getElement: (i) => els[i] || null, els };
   };
   const elements = channels.map((c) => {
-    const params = { label: c.label, volume: c.volume ?? 1, pan: c.pan ?? 0.5, mute: c.mute ?? 0, solo: c.solo ?? 0, recordArmed: c.recordArmed ?? 0, automationMode: c.automationMode ?? 0, 'Inserts/bypassAll': 0 };
+    const params = { label: c.label, volume: c.volume ?? 1, pan: c.pan ?? 0.5, mute: c.mute ?? 0, solo: c.solo ?? 0, recordArmed: c.recordArmed ?? 0, automationMode: c.automationMode ?? 0, monitor: c.monitor ?? 0, 'Inserts/bypassAll': 0 };
+    // Routing as on 5.5.2: list index -1, names only as display text through an alias.
+    if (c.output) params.outputPort = -1;
+    if (c.input) params.recordPort = -1;
+    const routeName = { outputPort: c.output, recordPort: c.input };
     (c.inserts || []).forEach((x, i) => (params[`Inserts/[${i}]/@bypass`] = x.bypassed ? 1 : 0));
     const banks = {
       inserts: bankOf(c.inserts || [], (x) => ({ '@owner/deviceName': x.name })),
@@ -199,6 +203,7 @@ export function fakeMixer(channels) {
       banks,
       find: (name) => banks[name] || null,
       isConnected: () => true,
+      connectAliasParam: (alias, id) => (alias.string = routeName[id] ?? String(params[id])),
       getParamValue: (id) => params[id],
       setParamValue: (id, v) => {
         params[id] = v;

@@ -75,6 +75,13 @@ test('automation: mode per channel by name; setAutomation validates and reports 
   assert.match(ring('setAutomation', { channel: 'Z', mode: 'off' }).error, /no channel named Z/);
 });
 
+test('channels: monitor, and routing names (null when a strip has no such port); monitor is settable', () => {
+  const { ring } = setup({ channels: [{ label: 'A', input: 'In 1', output: 'Bus 1', monitor: 1 }, { label: 'Main' }] });
+  const r = plain(ring('channels').result);
+  assert.deepEqual(r.map((c) => [c.label, c.monitor, c.input, c.output]), [['A', 1, 'In 1', 'Bus 1'], ['Main', 0, null, null]]);
+  assert.deepEqual(plain(ring('setChannel', { channel: 'A', field: 'monitor', value: 0 }).result), { channel: 'A', field: 'monitor', before: 1, after: 0 });
+});
+
 test('setChannelLabel / setChannelColor: by channel label; validation', () => {
   const { ring, mixer } = setup({ channels: [{ label: 'A' }, { label: 'B' }] });
   assert.deepEqual(plain(ring('setChannelLabel', { channel: 'A', name: 'Vox' }).result), { before: 'A', after: 'Vox' });
