@@ -21,6 +21,7 @@ import { trackEdit } from './tracks.js';
 import { recordSetup } from './record.js';
 import { snapshot } from './snapshots.js';
 import { bounce } from './bounce.js';
+import { diffSongs } from './diff.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -72,6 +73,28 @@ server.tool(
       .filter((f) => f.endsWith('.song'))
       .map((f) => ({ file: join(history, f), modified: statSync(join(history, f)).mtime.toISOString() }))
       .sort((a, b) => b.modified.localeCompare(a.modified));
+  }),
+);
+
+server.tool(
+  'song_diff',
+  "What changed between two saves of a song: tempo, meter, markers, sections, tracks (added, removed, renamed, active take, events, notes), mixer (level, pan, mute, solo, automation mode, output, plug-ins and their saved settings) and automation envelopes. Compares `song` with `against` (default: the newest autosave in the song's History folder), older to newer by file time, so by default it answers \"what have I changed since I saved?\" (or, if the save is newer, since the last autosave). Both take a title or a .song path; paths from song_history work.",
+  { song: z.string(), against: z.string().optional() },
+  guard(({ song, against }) => {
+    const main = resolveSong(song).path;
+    let other;
+    if (against) other = resolveSong(against).path;
+    else {
+      const history = join(songFolder(main), 'History');
+      const saves = existsSync(history)
+        ? readdirSync(history).filter((f) => f.endsWith('.song')).map((f) => join(history, f)).filter((p) => p !== main).sort((x, y) => statSync(y).mtimeMs - statSync(x).mtimeMs)
+        : [];
+      if (!saves.length) throw new Error(`no autosaves to compare ${song} against; pass against`);
+      other = saves[0];
+    }
+    const [from, to] = statSync(other).mtimeMs <= statSync(main).mtimeMs ? [other, main] : [main, other];
+    const changes = diffSongs(readSong(from), readSong(to));
+    return { from, to, changes: changes.length, diff: changes };
   }),
 );
 
