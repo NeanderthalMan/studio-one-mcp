@@ -226,6 +226,20 @@ test('selectEvents + Event/Mute Events + Unmute: events toggled and restored', a
 
 // ---- loop, takes, undo, track state, event edits, add track, meters ----------------
 
+// Undo until the test's own edit is gone (at most `max` steps), checking after each.
+// Why not one undo: on 5.5.2 a mixer parameter set and set back (an earlier test's
+// restore) becomes an undo step that changes nothing and is recorded late, on top
+// of later edits, so one undo removed that instead of the edit just made. Our edit is
+// on the stack, and anything above it is newer, i.e. from the tests, so undoing
+// until it is gone never reaches edits made before the run.
+async function undoUntil(isUndone, what, max = 3) {
+  for (let i = 1; i <= max; i++) {
+    await call("undo", {}); // a refused undo (done 0) changes nothing, so trying again is safe
+    if (await isUndone()) return i;
+  }
+  throw new Error(`${what} still there after ${max} undos`);
+}
+
 const uniqueNamed = async (pred = () => true) => {
   const tracks = await call('tracks');
   const names = tracks.map((x) => x.name);
@@ -293,7 +307,7 @@ test('takes add and duplicate: one more take each, one undo each, active take ke
     try {
       assert.equal(r.takes, before.takes + 1, `${action}: one more take`);
     } finally {
-      await call('undo', {});
+      await undoUntil(async () => (await call('takes', { track: track.name })).takes === before.takes, `the ${action}ed take`);
     }
     const after = await call('takes', { track: track.name });
     assert.deepEqual([after.takes, after.activeEvents], [before.takes, before.activeEvents], `${action} undone`);
@@ -325,7 +339,7 @@ test('editEvents split, then undo restores the events', async (t) => {
   try {
     assert.equal(r.events.length, track.events.length + 1, 'one more event after the split');
   } finally {
-    await call('undo', {});
+    await undoUntil(async () => (await call('tracks', { name: track.name })).find((x) => x.name === track.name).eventCount === track.eventCount, 'the split');
     // The undo re-selects the split track; put the selection back.
     for (const [i, name] of sel0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
@@ -339,7 +353,7 @@ test('addTrack, then undo removes it; selection restored', async () => {
   try {
     assert.equal(r.trackCount, n0 + 1);
   } finally {
-    await call('undo', {});
+    await undoUntil(async () => (await call('song')).trackCount === n0, 'the added track');
     for (const [i, name] of song0.selectedTracks.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
   assert.equal((await call('song')).trackCount, n0);
@@ -539,7 +553,7 @@ test('routing and monitor: output names on tracks; monitor set and restored', as
   }
 });
 
-// One undo step (checked by hand twice); the result is verified, not assumed.
+// One undo step when checked by hand; in a run it can take more (see undoUntil).
 test('add a bus for one track, then undo removes it and restores the routing', async () => {
   const track = await uniqueNamed((x) => x.channel && x.mediaType === 'Audio');
   const chans0 = await call('channels');
@@ -549,7 +563,7 @@ test('add a bus for one track, then undo removes it and restores the routing', a
     assert.equal(r.added.length, 1, `one new channel: ${r.added}`);
     assert.equal(r.routed[0].output, r.added[0], 'the track now goes to the new bus');
   } finally {
-    await call('undo', {});
+    await undoUntil(async () => !(await call('channels')).some((c) => c.label === r.added[0]), 'the new bus');
     for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
   const chans1 = await call('channels');

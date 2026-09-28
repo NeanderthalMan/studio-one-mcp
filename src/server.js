@@ -297,7 +297,7 @@ server.tool(
 
 server.tool(
   'live_undo',
-  'Undo the last edit(s) in the running Studio One.',
+  "Undo the last edit(s) in the running Studio One; returns how many ran (a refused undo counts 0). Check the result rather than counting steps: mixer parameter changes (volume, monitor, plug-in parameters, automation mode...) become undo steps that are recorded late and merge, so an undo can land on one of those instead of the edit you just made. Undo again until your edit is gone.",
   { steps: z.number().int().optional() },
   guard((a) => call('undo', a)),
 );
