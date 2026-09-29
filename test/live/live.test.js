@@ -232,10 +232,26 @@ test('selectEvents + Event/Mute Events + Unmute: events toggled and restored', a
 // of later edits, so one undo removed that instead of the edit just made. Our edit is
 // on the stack, and anything above it is newer, i.e. from the tests, so undoing
 // until it is gone never reaches edits made before the run.
-async function undoUntil(isUndone, what, max = 3) {
+const counts = async () => ({ tracks: (await call("song")).trackCount, channels: (await call("channels")).length });
+
+// `baseline`: counts() before the test made its edit. Undo steps that are the
+// invisible parameter ones must not change the counts; once our edit is gone the
+// counts must be back at the baseline. Anything else means an undo reached some
+// other edit: it is redone and the test fails, rather than digging further.
+async function undoUntil(isUndone, what, baseline, max = 8) {
+  const withEdit = await counts();
   for (let i = 1; i <= max; i++) {
     await call("undo", {}); // a refused undo (done 0) changes nothing, so trying again is safe
-    if (await isUndone()) return i;
+    const now = await counts();
+    if (await isUndone()) {
+      if (now.tracks === baseline.tracks && now.channels === baseline.channels) return i;
+      await call("redo", {});
+      throw new Error(`removing ${what} changed the song unexpectedly (redone): ${JSON.stringify({ baseline, now })}`);
+    }
+    if (now.tracks !== withEdit.tracks || now.channels !== withEdit.channels) {
+      await call("redo", {});
+      throw new Error(`an undo reached another edit while removing ${what} (redone): ${JSON.stringify({ withEdit, now })}`);
+    }
   }
   throw new Error(`${what} still there after ${max} undos`);
 }
@@ -303,11 +319,12 @@ test('takes add and duplicate: one more take each, one undo each, active take ke
   if (!track) return t.skip('no track with more than one take');
   const before = await call('takes', { track: track.name });
   for (const action of ['add', 'duplicate']) {
+    const base = await counts();
     const r = await call('takes', { track: track.name, action });
     try {
       assert.equal(r.takes, before.takes + 1, `${action}: one more take`);
     } finally {
-      await undoUntil(async () => (await call('takes', { track: track.name })).takes === before.takes, `the ${action}ed take`);
+      await undoUntil(async () => (await call('takes', { track: track.name })).takes === before.takes, `the ${action}ed take`, base);
     }
     const after = await call('takes', { track: track.name });
     assert.deepEqual([after.takes, after.activeEvents], [before.takes, before.activeEvents], `${action} undone`);
@@ -335,11 +352,12 @@ test('editEvents split, then undo restores the events', async (t) => {
   if (!track) return t.skip('no track with an event longer than 2 s');
   const ev = track.events.find((e) => e.end - e.start > 2);
   const sel0 = (await call('song')).selectedTracks;
+  const base = await counts();
   const r = await call('editEvents', { track: track.name, action: 'split', at: ev.start + 1 });
   try {
     assert.equal(r.events.length, track.events.length + 1, 'one more event after the split');
   } finally {
-    await undoUntil(async () => (await call('tracks', { name: track.name })).find((x) => x.name === track.name).eventCount === track.eventCount, 'the split');
+    await undoUntil(async () => (await call('tracks', { name: track.name })).find((x) => x.name === track.name).eventCount === track.eventCount, 'the split', base);
     // The undo re-selects the split track; put the selection back.
     for (const [i, name] of sel0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
@@ -349,11 +367,12 @@ test('editEvents split, then undo restores the events', async (t) => {
 test('addTrack, then undo removes it; selection restored', async () => {
   const song0 = await call('song');
   const n0 = song0.trackCount;
+  const base = await counts();
   const r = await call('addTrack', { type: 'audioMono' });
   try {
     assert.equal(r.trackCount, n0 + 1);
   } finally {
-    await undoUntil(async () => (await call('song')).trackCount === n0, 'the added track');
+    await undoUntil(async () => (await call('song')).trackCount === n0, 'the added track', base);
     for (const [i, name] of song0.selectedTracks.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
   assert.equal((await call('song')).trackCount, n0);
@@ -558,12 +577,13 @@ test('add a bus for one track, then undo removes it and restores the routing', a
   const track = await uniqueNamed((x) => x.channel && x.mediaType === 'Audio');
   const chans0 = await call('channels');
   const out0 = chans0.find((c) => c.label === track.channel).output;
+  const base = await counts();
   const r = await addBus(call, { tracks: [track.name] });
   try {
     assert.equal(r.added.length, 1, `one new channel: ${r.added}`);
     assert.equal(r.routed[0].output, r.added[0], 'the track now goes to the new bus');
   } finally {
-    await undoUntil(async () => !(await call('channels')).some((c) => c.label === r.added[0]), 'the new bus');
+    await undoUntil(async () => !(await call('channels')).some((c) => c.label === r.added[0]), 'the new bus', base);
     for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
   const chans1 = await call('channels');
