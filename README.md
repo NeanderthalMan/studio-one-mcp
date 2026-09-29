@@ -86,7 +86,7 @@ If something doesn't work, run:
 npx studio-one-mcp doctor      # or: npm run doctor
 ```
 
-It checks every link in the chain and tells you how to fix the first broken one: Node, profile, Songs folder, device installed and current, MIDI port, Studio One running, bridge loaded, bridge answering, and MCP client registration.
+It checks every link in the chain and tells you how to fix the first broken one: Node, profile, Songs folder, device installed and current, edit-task extension installed and current, MIDI port, Studio One running, bridge loaded, bridge answering, the edit task loaded in Studio One, and MCP client registration. `setup` treats the device and the extension as one install: if either is missing or out of date (for example after an update), it offers to reinstall both.
 
 To remove the device and the extension: `npx studio-one-mcp uninstall`, then remove **MCP Bridge** under External Devices.
 

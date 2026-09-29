@@ -7,7 +7,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { installDevice, deviceStatus, deviceTarget, fileUrl, readDeviceConfig } from '../src/setup/device.js';
+import { installDevice, deviceStatus, deviceTarget, fileUrl, readDeviceConfig, editTasksStatus, editTasksTarget } from '../src/setup/device.js';
+import { rmSync } from 'node:fs';
+import { zipSync, unzipSync, strToU8 } from 'fflate';
 import { pickMidiPort, serverEntry, claudeCodeAddArgs, mergeDesktopConfig, readDesktopConfig, serverPath } from '../src/setup/checks.js';
 import { formatReport } from '../src/setup/doctor.js';
 
@@ -20,14 +22,42 @@ test('fileUrl keeps spaces unencoded, like Studio One does', () => {
 
 test('deviceStatus: not installed → installed and current → stale after a change', () => {
   const profile = tmp('s1prof-');
-  assert.deepEqual(deviceStatus(profile), { installed: false, current: false, config: null });
+  const none = deviceStatus(profile);
+  assert.deepEqual([none.installed, none.current, none.config, none.editTasks.installed], [false, false, null, false]);
   installDevice({ profile, allowEval: true, mailbox: join(profile, 'mb') });
   const ok = deviceStatus(profile);
-  assert.deepEqual([ok.installed, ok.current, ok.config.allowEval], [true, true, true]);
+  assert.deepEqual([ok.installed, ok.current, ok.config.allowEval, ok.editTasks.current], [true, true, true, true]);
   writeFileSync(join(deviceTarget(profile), 'BridgeCore.js'), '// old version\n');
   const stale = deviceStatus(profile);
   assert.deepEqual([stale.installed, stale.current, stale.stale], [true, false, ['BridgeCore.js']]);
   assert.equal(readDeviceConfig(profile).mailbox, fileUrl(join(profile, 'mb')) + '/');
+});
+
+// The upgrade case: a device installed before the extension existed is current on
+// its own files, but the install is not complete until the extension is there.
+test('deviceStatus: a current device without the edit-task extension is out of date', () => {
+  const profile = tmp('s1prof-');
+  installDevice({ profile, mailbox: join(profile, 'mb') });
+  rmSync(editTasksTarget(profile), { recursive: true, force: true });
+  const s = deviceStatus(profile);
+  assert.deepEqual([s.installed, s.current, s.editTasks.installed], [true, false, false]);
+  assert.match(s.stale.join(), /edit-task extension \(not installed\)/);
+});
+
+test('editTasksStatus: a stale package file or extension metadata is named; the generated config is not compared', () => {
+  const profile = tmp('s1prof-');
+  installDevice({ profile, mailbox: join(profile, 'mb') });
+  const pkg = join(editTasksTarget(profile), 'scripts', 'studio-one-mcp.package');
+  const files = unzipSync(readFileSync(pkg));
+  files['McpEditConfig.js'] = strToU8('var McpEditConfig = { mailbox: "file:///somewhere/else/" };');
+  writeFileSync(pkg, zipSync(files));
+  assert.equal(editTasksStatus(profile).current, true, 'a different mailbox is not staleness');
+  files['McpEdit.js'] = strToU8('// old task\n');
+  writeFileSync(pkg, zipSync(files));
+  writeFileSync(join(editTasksTarget(profile), 'metainfo.xml'), '<old/>');
+  assert.deepEqual(editTasksStatus(profile).stale.sort(), ['Extensions/metainfo.xml', 'edit-task package: McpEdit.js']);
+  writeFileSync(pkg, 'not a zip');
+  assert.match(editTasksStatus(profile).stale.join(), /unreadable/);
 });
 
 test('pickMidiPort: IAC first, then loopMIDI / studio-one-mcp, or an explicit name', () => {

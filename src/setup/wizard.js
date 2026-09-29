@@ -48,7 +48,7 @@ export async function setup(argv = []) {
     // 2. Device
     step(2, 'MCP Bridge device');
     const before = deviceStatus(profile);
-    say(`   ${before.installed ? (before.current ? 'Installed and up to date.' : 'Installed, but out of date.') : 'Not installed yet.'}`);
+    say(`   ${before.installed ? (before.current ? 'Installed and up to date (device and edit-task extension).' : `Installed, but out of date: ${before.stale.join(', ')}.`) : 'Not installed yet.'}`);
     let changedDevice = false;
     if (!before.current && (await ask('   Install it now?'))) {
       say('   live_eval runs arbitrary JavaScript inside Studio One. Useful for development; leave it off otherwise.');

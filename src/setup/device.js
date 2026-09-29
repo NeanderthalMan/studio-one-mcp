@@ -2,7 +2,7 @@
 import { cpSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { zipSync, strToU8 } from 'fflate';
+import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
 import { mailboxDir } from '../paths.js';
 
 export const deviceSource = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'device', 'StudioOneMCP');
@@ -63,10 +63,40 @@ export function readDeviceConfig(profile) {
   }
 }
 
-// installed: files present; current: identical to this checkout's device/ folder.
+// The edit-task extension: installed if its package is there; current if its
+// metadata and the package's files (all but the generated McpEditConfig.js)
+// match this checkout.
+export function editTasksStatus(profile) {
+  const target = editTasksTarget(profile);
+  const pkgFile = join(target, 'scripts', 'studio-one-mcp.package');
+  if (!existsSync(pkgFile)) return { installed: false, current: false, stale: ['edit-task extension (not installed)'] };
+  const stale = [];
+  for (const f of readdirSync(join(editTasksSource, 'extension'))) {
+    try {
+      if (readFileSync(join(editTasksSource, 'extension', f), 'utf8') !== readFileSync(join(target, f), 'utf8')) stale.push(`Extensions/${f}`);
+    } catch {
+      stale.push(`Extensions/${f}`);
+    }
+  }
+  let files = {};
+  try {
+    files = unzipSync(readFileSync(pkgFile));
+  } catch {
+    stale.push('edit-task package (unreadable)');
+  }
+  for (const f of readdirSync(join(editTasksSource, 'package'))) {
+    const mine = readFileSync(join(editTasksSource, 'package', f), 'utf8');
+    if (!files[f] || strFromU8(files[f]) !== mine) stale.push(`edit-task package: ${f}`);
+  }
+  return { installed: true, current: stale.length === 0, stale };
+}
+
+// installed: files present; current: identical to this checkout's device/ folder,
+// with the edit-task extension present and current too.
 export function deviceStatus(profile) {
   const target = deviceTarget(profile);
-  if (!existsSync(join(target, 'StudioOneMCP.device'))) return { installed: false, current: false, config: null };
+  const editTasks = editTasksStatus(profile);
+  if (!existsSync(join(target, 'StudioOneMCP.device'))) return { installed: false, current: false, config: null, editTasks };
   const stale = readdirSync(deviceSource).filter((f) => {
     try {
       return readFileSync(join(deviceSource, f), 'utf8') !== readFileSync(join(target, f), 'utf8');
@@ -74,5 +104,6 @@ export function deviceStatus(profile) {
       return true;
     }
   });
-  return { installed: true, current: stale.length === 0, stale, config: readDeviceConfig(profile) };
+  if (!editTasks.current) stale.push(...editTasks.stale);
+  return { installed: true, current: stale.length === 0, stale, config: readDeviceConfig(profile), editTasks };
 }

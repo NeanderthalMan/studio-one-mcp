@@ -27,11 +27,17 @@ export async function runChecks({ profile, live = true } = {}) {
   const roots = songRoots();
   add('Songs folder', roots.length ? PASS : WARN, roots.join(', ') || 'none found', roots.length ? null : 'Set STUDIO_ONE_SONGS to your Songs folder for the song_* tools');
 
+  let editTasks = null;
   if (chosen) {
     const d = deviceStatus(chosen);
+    editTasks = d.editTasks;
+    const deviceStale = (d.stale || []).filter((s) => !d.editTasks.stale.includes(s));
     if (!d.installed) add('Bridge device installed', FAIL, 'not installed', 'Run: studio-one-mcp setup');
-    else if (!d.current) add('Bridge device installed', WARN, `out of date (${d.stale.join(', ')})`, 'Run: studio-one-mcp setup (then restart Studio One)');
+    else if (deviceStale.length) add('Bridge device installed', WARN, `out of date (${deviceStale.join(', ')})`, 'Run: studio-one-mcp setup (then restart Studio One)');
     else add('Bridge device installed', PASS, `live_eval ${d.config?.allowEval ? 'enabled' : 'disabled'}`, null);
+    if (!editTasks.installed) add('Edit-task extension', FAIL, 'not installed (live_edit_notes needs it)', 'Run: studio-one-mcp setup (then restart Studio One)');
+    else if (!editTasks.current) add('Edit-task extension', WARN, `out of date (${editTasks.stale.join(', ')})`, 'Run: studio-one-mcp setup (then restart Studio One)');
+    else add('Edit-task extension', PASS, 'installed', null);
   }
 
   const midi = midiOutputs();
@@ -56,6 +62,16 @@ export async function runChecks({ profile, live = true } = {}) {
         const t0 = Date.now();
         await call('ping', {}, { timeoutMs: 2500 });
         add('Bridge answers', PASS, `ping ${Date.now() - t0} ms`, null);
+        // Studio One loads extensions only at startup: installed is not the same as loaded.
+        if (editTasks?.installed) {
+          try {
+            const cmds = await call('listCommands', { filter: 'MCP Edit' }, { timeoutMs: 5000 });
+            const loaded = cmds.some((c) => c.category === 'Musical Functions' && c.name === 'MCP Edit');
+            add('Edit task loaded', loaded ? PASS : WARN, loaded ? 'Musical Functions/MCP Edit' : 'not loaded yet', loaded ? null : 'Restart Studio One: it loads extensions only at startup');
+          } catch (e) {
+            add('Edit task loaded', WARN, `could not check: ${e.message}`, null);
+          }
+        }
       } catch (e) {
         add('Bridge answers', FAIL, e.message,
           `Check the MCP Bridge device's Receive From is "${port || 'the virtual MIDI port'}", then restart Studio One. A Scripting Error dialog left open can also block it.`);
