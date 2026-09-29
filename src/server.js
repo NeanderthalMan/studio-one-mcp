@@ -22,6 +22,7 @@ import { recordSetup } from './record.js';
 import { snapshot } from './snapshots.js';
 import { bounce } from './bounce.js';
 import { diffSongs } from './diff.js';
+import { gridBeats } from './grid.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -187,12 +188,14 @@ const NOTE_FILTER = z
 
 server.tool(
   'live_edit_notes',
-  "Edit the notes of an instrument track's parts in the running Studio One, through the MCP Edit task (installed with the device). Operations run in order: transpose {semitones}, velocity {set 1-127 | add}, move {beats}, length {set beats | scale}, delete (needs a filter), add {notes: [{pitch, beat, length, velocity}]}. Each can take a filter (pitch, pitches, from/to beats). Beats are the ones live_notes reports. Returns what each operation touched and the notes afterwards. One live_undo per operation, usually; check with live_notes.",
+  "Edit the notes of an instrument track's parts in the running Studio One, through the MCP Edit task (installed with the device). Operations run in order: transpose {semitones}, velocity {set 1-127 | add}, move {beats}, length {set beats | scale}, quantize {grid like 1/16, 1/8T (triplet) or 1/8. (dotted), strength 0-1; note starts only, Studio One's own quantize setting is left alone}, delete (needs a filter), add {notes: [{pitch, beat, length, velocity}]}. Each can take a filter (pitch, pitches, from/to beats). Beats are the ones live_notes reports. Returns what each operation touched and the notes afterwards. One live_undo per operation, usually; check with live_notes.",
   {
     track: z.string(),
     ops: z.array(
       z.object({
-        op: z.enum(['transpose', 'velocity', 'move', 'length', 'delete', 'add']),
+        op: z.enum(['transpose', 'velocity', 'move', 'length', 'quantize', 'delete', 'add']),
+        grid: z.union([z.string(), z.number()]).optional().describe('For quantize: "1/16", "1/8T" (triplet), "1/8." (dotted), or beats'),
+        strength: z.number().optional().describe('For quantize: 0..1 (default 1)'),
         filter: NOTE_FILTER,
         semitones: z.number().int().optional(),
         set: z.number().optional(),
@@ -204,7 +207,7 @@ server.tool(
     ),
   },
   guard(async ({ track, ops }) => {
-    const r = await call('editNotes', { track, ops });
+    const r = await call('editNotes', { track, ops: ops.map((o) => (o.op === 'quantize' ? { ...o, grid: gridBeats(o.grid) } : o)) });
     for (const p of r.parts || []) for (const n of p.notes) if (typeof n.pitch === 'number') n.note = noteName(n.pitch);
     return r;
   }),

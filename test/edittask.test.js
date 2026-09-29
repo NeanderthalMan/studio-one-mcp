@@ -74,6 +74,22 @@ test('transpose, velocity (set and add), move and length, in order, with filters
   assert.equal(r.id, 'r1');
 });
 
+test('quantize: starts snap to the grid, with strength; on-grid notes are left alone', () => {
+  const { task, request, result } = load();
+  const { context, notes } = editContext([[60, 4.1, 0.2], [62, 4.5, 0.2], [64, 4.9, 0.2]]);
+  request([{ op: 'quantize', grid: 0.5, filter: { pitches: [60, 62] } }, { op: 'quantize', grid: 0.5, strength: 0.5, filter: { pitch: 64 } }]);
+  task.performEdit(context);
+  const r = result();
+  assert.deepEqual(r.applied, [{ op: 'quantize', notes: 1 }, { op: 'quantize', notes: 1 }], 'the note already on 4.5 is not touched');
+  assert.deepEqual(notes.map((n) => Math.round(n.startTime.time * 1000) / 1000), [4, 4.5, 4.95]);
+  bad: {
+    const b = load();
+    b.request([{ op: 'quantize' }]);
+    b.task.performEdit(editContext([[60, 1, 1]]).context);
+    assert.match(b.result().errors[0], /quantize needs grid/);
+  }
+});
+
 test('delete needs a filter; add inserts into the part of the existing notes', () => {
   const { task, request, result } = load();
   const { context, notes } = editContext([[60, 4, 1], [62, 5, 1]]);

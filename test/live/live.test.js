@@ -541,6 +541,24 @@ test('edit notes: transpose one note and set a velocity through the MCP Edit tas
   }
 });
 
+test('edit notes: quantize one note to quarters, then undo', async (t) => {
+  const music = (await call('tracks')).find((x) => x.mediaType === 'Music' && x.eventCount > 0);
+  if (!music) return t.skip('no instrument track with a part');
+  const read = async () => (await call('notes', { track: music.name })).parts.flatMap((p) => p.notes.map((n) => `${n.pitch}@${n.beat}v${n.velocity}`));
+  const before = await read();
+  const off = (await call('notes', { track: music.name })).parts.flatMap((p) => p.notes).find((n) => Math.abs(n.beat - Math.round(n.beat)) > 0.01);
+  if (!off) return t.skip('every note already sits on a beat');
+  const base = await counts();
+  const r = await call('editNotes', { track: music.name, ops: [{ op: 'quantize', grid: 1, filter: { from: off.beat - 0.001, to: off.beat + 0.001 } }] });
+  try {
+    assert.deepEqual(r.applied, [{ op: 'quantize', notes: 1 }]);
+    const moved = r.parts.flatMap((p) => p.notes).filter((n) => n.pitch === off.pitch && Math.abs(n.beat - Math.round(off.beat)) < 0.001);
+    assert.equal(moved.length, 1, `a ${off.pitch} now starts on beat ${Math.round(off.beat)}`);
+  } finally {
+    await undoUntil(async () => (await read()).join() === before.join(), 'the quantize', base);
+  }
+});
+
 // A scratch track is added, renamed, recoloured and removed: the song ends as it began
 // (two undo steps: add, remove). Rename and colour are not undo steps.
 test('track edit: rename, colour and remove a scratch track; selection kept', async () => {

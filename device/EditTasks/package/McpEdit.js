@@ -107,6 +107,19 @@ function mcpApply(context, ops) {
 					count++;
 				}
 				break;
+			case "quantize":
+				// grid in beats (the server turns "1/16" into 0.25); strength 0..1.
+				if (typeof op.grid !== "number" || op.grid <= 0 || !mcpHas(fns, "moveEvent")) { errors.push("quantize needs grid (beats > 0)"); break; }
+				var strength = typeof op.strength === "number" ? mcpClamp(op.strength, 0, 1) : 1;
+				for (var q = 0; q < hit.length; q++) {
+					var sq = mcpStart(hit[q]);
+					if (sq === null) continue;
+					var target = Math.round(sq / op.grid) * op.grid;
+					if (Math.abs(target - sq) < 1e-9) continue;
+					fns.moveEvent(hit[q], sq + (target - sq) * strength);
+					count++;
+				}
+				break;
 			case "delete":
 				if (!op.filter) { errors.push("delete needs a filter (refusing to delete every note)"); break; }
 				if (!mcpHas(fns, "deleteEvent")) { errors.push("delete not available"); break; }
