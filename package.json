@@ -1,7 +1,15 @@
 {
   "name": "studio-one-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server for PreSonus Studio One: read songs from .song files, and talk to a running Studio One through an in-app bridge device.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NeanderthalMan/studio-one-mcp.git"
+  },
+  "homepage": "https://github.com/NeanderthalMan/studio-one-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/NeanderthalMan/studio-one-mcp/issues"
+  },
   "type": "module",
   "bin": {
     "studio-one-mcp": "src/cli.js"

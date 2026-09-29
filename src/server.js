@@ -23,6 +23,7 @@ import { snapshot } from './snapshots.js';
 import { bounce } from './bounce.js';
 import { diffSongs } from './diff.js';
 import { gridBeats } from './grid.js';
+import { version } from './version.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -36,7 +37,7 @@ const guard = (fn) => async (args) => {
 
 // ---- server ---------------------------------------------------------------------
 
-const server = new McpServer({ name: 'studio-one-mcp', version: '0.1.0' });
+const server = new McpServer({ name: 'studio-one-mcp', version });
 
 server.tool(
   'song_list',

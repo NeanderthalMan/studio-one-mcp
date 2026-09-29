@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { installDevice, deviceStatus, deviceTarget, fileUrl, readDeviceConfig, editTasksStatus, editTasksTarget } from '../src/setup/device.js';
 import { rmSync } from 'node:fs';
 import { zipSync, unzipSync, strToU8 } from 'fflate';
-import { pickMidiPort, serverEntry, claudeCodeAddArgs, mergeDesktopConfig, readDesktopConfig, serverPath } from '../src/setup/checks.js';
+import { pickMidiPort, serverEntry, claudeCodeAddArgs, mergeDesktopConfig, readDesktopConfig, serverPath, runningFromNpx } from '../src/setup/checks.js';
+import { version } from '../src/version.js';
 import { formatReport } from '../src/setup/doctor.js';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
@@ -73,6 +74,18 @@ test('serverEntry: node + absolute server path; MIDI port env only when not IAC'
   assert.deepEqual(serverEntry({ midiPort: 'IAC Driver Bus 1' }), { command: process.execPath, args: [serverPath] });
   assert.deepEqual(serverEntry({ midiPort: 'loopMIDI Port' }).env, { STUDIO_ONE_MCP_MIDI_PORT: 'loopMIDI Port' });
   assert.ok(existsSync(serverPath));
+});
+
+test('serverEntry from npx: registers npx pinned to this version, not the cache path', () => {
+  const cached = '/Users/me/.npm/_npx/3f2a9c/node_modules/studio-one-mcp/src/server.js';
+  assert.equal(runningFromNpx(cached), true);
+  assert.equal(runningFromNpx(serverPath), false, 'this checkout is not the npx cache');
+  assert.deepEqual(serverEntry({ path: cached, platform: 'darwin', pkgVersion: '0.2.0' }), { command: 'npx', args: ['-y', 'studio-one-mcp@0.2.0'] });
+  const win = 'C:\\Users\\me\\AppData\\Local\\npm-cache\\_npx\\3f2a9c\\node_modules\\studio-one-mcp\\src\\server.js';
+  assert.deepEqual(serverEntry({ path: win, platform: 'win32', pkgVersion: '0.2.0', midiPort: 'loopMIDI Port' }), {
+    command: 'cmd', args: ['/c', 'npx', '-y', 'studio-one-mcp@0.2.0'], env: { STUDIO_ONE_MCP_MIDI_PORT: 'loopMIDI Port' },
+  });
+  assert.deepEqual(serverEntry({ path: cached }).args, ['-y', `studio-one-mcp@${version}`], 'defaults to package.json');
 });
 
 test('claude mcp add arguments: user scope, env, then the command', () => {

@@ -11,6 +11,8 @@ Studio One has no public API, no OSC, and no network scripting. This server comb
 
 Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Windows and for Studio One 6/7 and Studio Pro 8 are wired in but untested.
 
+An independent project, not affiliated with or endorsed by PreSonus or Fender. Studio One is their trademark.
+
 ## Tools
 
 | Tool | What it does |
@@ -61,6 +63,12 @@ Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Window
 You need Node.js 20 or newer and Studio One.
 
 ```sh
+npx -y studio-one-mcp setup
+```
+
+That is the whole install: npm fetches the package and the guided setup below takes it from there. To work on the code instead, clone it and run setup from the checkout, which then registers that checkout:
+
+```sh
 git clone https://github.com/NeanderthalMan/studio-one-mcp.git
 cd studio-one-mcp
 npm install
@@ -74,23 +82,23 @@ npx studio-one-mcp setup
 3. It checks for a virtual MIDI port, which acts as the bridge's doorbell:
    - **macOS:** the built-in IAC Driver. `setup` can open Audio MIDI Setup for you. Tick **Device is online** under **IAC Driver**.
    - **Windows:** install [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html) and add a port named `studio-one-mcp`.
-4. It registers the server with Claude Code (all projects) and, if you want, Claude Desktop. It backs up the Desktop config before editing it. For any other client, it prints the JSON to paste.
+4. It registers the server with Claude Code (all projects) and, if you want, Claude Desktop. Installed with `npx`, it registers `npx -y studio-one-mcp@<this version>`, pinned so the server always matches the device it installed; from a clone, it registers that checkout. It backs up the Desktop config before editing it. For any other client, it prints the JSON to paste.
 5. It shows the one step you do in Studio One: **Preferences… (⌘,)** on a Mac, **Options** on Windows → **External Devices → Add… → studio-one-mcp → MCP Bridge**. Set **Receive From** to your virtual MIDI port, and **Send To** to None. Restart Studio One first if it was running.
 6. It waits for Studio One to answer.
 
-`npm run setup` does the same thing. Use `--yes` to accept the defaults, `--dry-run` to see what it would do, and `--profile <dir>` to pick a profile.
+From a clone, `npm run setup` does the same thing. Use `--yes` to accept the defaults, `--dry-run` to see what it would do, and `--profile <dir>` to pick a profile.
 
 If something doesn't work, run:
 
 ```sh
-npx studio-one-mcp doctor      # or: npm run doctor
+npx -y studio-one-mcp doctor   # from a clone also: npm run doctor
 ```
 
 It checks every link in the chain and tells you how to fix the first broken one: Node, profile, Songs folder, device installed and current, edit-task extension installed and current, MIDI port, Studio One running, bridge loaded, bridge answering, the edit task loaded in Studio One, and MCP client registration. `setup` treats the device and the extension as one install: if either is missing or out of date (for example after an update), it offers to reinstall both.
 
-To remove the device and the extension: `npx studio-one-mcp uninstall`, then remove **MCP Bridge** under External Devices.
+To remove the device and the extension: `npx -y studio-one-mcp uninstall`, then remove **MCP Bridge** under External Devices.
 
-After updating studio-one-mcp, run `setup` (or `node scripts/install-device.js`) again and restart Studio One: it loads the device and the extension only at startup.
+To update: `npx -y studio-one-mcp@latest setup`. It reinstalls the device and the extension and registers the new version. From a clone: `git pull`, then `setup` again. Either way, restart Studio One afterwards: it loads the device and the extension only at startup.
 
 **Without the live bridge:** the `song_*` tools need nothing but the MCP registration. They read your `.song` files directly.
 

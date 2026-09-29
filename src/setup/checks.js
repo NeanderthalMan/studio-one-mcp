@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { homedir, platform } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { version } from '../version.js';
 
 const require = createRequire(import.meta.url);
 export const isMac = platform() === 'darwin';
@@ -43,8 +44,21 @@ export function studioOneRunning() {
   return false;
 }
 
-export function serverEntry({ midiPort } = {}) {
-  const entry = { command: process.execPath, args: [serverPath] };
+// How an MCP client should launch the server. From a clone: this node and this
+// checkout's server.js. From `npx studio-one-mcp setup`: this file sits in npm's
+// npx cache (…/_npx/<hash>/…), which npm may clear at any time, so register npx
+// itself, pinned to this version so the server always matches the device and
+// extension this same setup installed. (Windows needs cmd /c to run npx.)
+export const runningFromNpx = (path = serverPath) => /[\\/]_npx[\\/]/.test(path);
+
+export function serverEntry({ midiPort, path = serverPath, platform = process.platform, pkgVersion = version } = {}) {
+  let entry;
+  if (runningFromNpx(path)) {
+    const npx = ['-y', `studio-one-mcp@${pkgVersion}`];
+    entry = platform === 'win32' ? { command: 'cmd', args: ['/c', 'npx', ...npx] } : { command: 'npx', args: npx };
+  } else {
+    entry = { command: process.execPath, args: [path] };
+  }
   if (midiPort && !/iac/i.test(midiPort)) entry.env = { STUDIO_ONE_MCP_MIDI_PORT: midiPort };
   return entry;
 }
