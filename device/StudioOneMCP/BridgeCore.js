@@ -140,6 +140,7 @@ class Bridge {
             case "tracks": return this.tracks(args);
             case "selectTrack": return this.selectTrack(args);
             case "notes": return this.notes(args);
+            case "editNotes": return this.editNotes(args);
             case "metronome": return this.metronome(args);
             case "transport": return this.transport(args);
             case "setTransport": return this.setTransport(args);
@@ -338,6 +339,30 @@ class Bridge {
         }
         const mediaType = has(t, "mediaType", "string") ? t.mediaType : null;
         return { track: String(t.name), mediaType: mediaType, parts: parts, truncated: skipped > 0 };
+    }
+
+    // Note edits through the "MCP Edit" task (device/EditTasks): the request goes
+    // to edit-request.json, the track's parts are selected, the task's command
+    // runs and writes edit-result.json. The selection is restored.
+    editNotes(args) {
+        if (!Array.isArray(args.ops) || !args.ops.length) return fail("ops: one or more edit operations");
+        if (!Host.GUI.Commands.findCommand("Musical Functions", "MCP Edit")) return fail("the MCP Edit task is not installed: reinstall the device, then restart Studio One");
+        const id = newSession();
+        this.mailbox.write("edit-result.json", { id: null });
+        this.mailbox.write("edit-request.json", { id: id, ops: args.ops });
+        const r = this.withTrack(args.track, () => {
+            const sel = this.command({ category: "Edit", name: "Select All on Tracks" });
+            if (isFail(sel)) return sel;
+            const done = this.run("Musical Functions", "MCP Edit");
+            this.command({ category: "Edit", name: "Deselect All" });
+            return done;
+        });
+        if (isFail(r)) return r;
+        const res = this.mailbox.read("edit-result.json");
+        if (!res || res.id !== id) return fail("the edit task did not report back (is the track's part empty of notes and not selectable?)");
+        if (res.error) return fail(res.error);
+        const after = this.notes({ track: args.track });
+        return { track: args.track, applied: res.applied, errors: res.errors, notesBefore: res.notesBefore, parts: isFail(after) ? null : after.parts };
     }
 
     selectTrack(args) {

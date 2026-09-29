@@ -21,7 +21,8 @@ if (flag('--uninstall')) {
   process.exit(0);
 }
 
-const { target, config } = installDevice({ profile, allowEval: flag('--allow-eval') });
+const { target, config, editTasks } = installDevice({ profile, allowEval: flag('--allow-eval') });
 console.log(`Installed bridge device → ${target}`);
+console.log(`Installed edit tasks → ${editTasks}`);
 console.log(`Mailbox → ${mailboxDir}${config.allowEval ? '  (eval ENABLED)' : ''}`);
 console.log('Next: restart Studio One, then Studio One → Preferences… (Mac) or Options (Windows) → External Devices → Add… → studio-one-mcp → MCP Bridge, Receive From: your virtual MIDI port (IAC Driver Bus 1).');

@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaInformation>
+	<Attribute id="Package:ID" value="studio-one-mcp.edittasks"/>
+	<Attribute id="Package:Name" value="studio-one-mcp Edit Tasks"/>
+	<Attribute id="Package:Description" value="Lets studio-one-mcp edit notes"/>
+	<Attribute id="Package:Version" value="0.1.0.0"/>
+	<Attribute id="Package:Vendor" value="studio-one-mcp"/>
+	<Attribute id="Package:Website" value="https://github.com/NeanderthalMan/studio-one-mcp"/>
+</MetaInformation>
