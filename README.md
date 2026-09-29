@@ -115,13 +115,61 @@ To update: `npx -y studio-one-mcp@latest setup`. It reinstalls the device and th
 
 Studio One runs control-surface scripts in an embedded SpiderMonkey engine. Scripts can read and write files but cannot open sockets, so the bridge is a folder. Studio One 5 also gives scripts no usable timer, so the bridge is event-driven. After writing a request, the server presses MIDI note 119 on a virtual MIDI bus (the macOS IAC Driver). The device's surface file maps that note, as a trigger control, to a toggle on a component parameter, and the component answers on each change.
 
+```mermaid
+flowchart LR
+  client["MCP client<br/>(Claude)"] <-->|stdio| server["studio-one-mcp<br/>server (Node)"]
+  server -->|"1 write request.json"| mailbox[("mailbox folder<br/>request.json<br/>response.json<br/>status.json")]
+  server -->|"2 press note 119"| iac["virtual MIDI bus<br/>(IAC Driver)"]
+  subgraph s1 ["Studio One"]
+    device["MCP Bridge device<br/>(control-surface script)"]
+    doc["song, mixer, transport,<br/>commands"]
+    task["MCP Edit task<br/>(extension)"]
+  end
+  iac -->|"3 note wakes the script"| device
+  mailbox -->|"4 read request"| device
+  device <-->|"5 run the op"| doc
+  device -.->|"note edits only"| task
+  device -->|"6 write response.json"| mailbox
+  mailbox -->|"7 read response"| server
 ```
-status.json    device → client   session id; refreshed whenever the bridge runs
+
+```
+status.json    device → client   session id and heartbeat; refreshed whenever the bridge runs
 request.json   client → device   {id, op, args}, written atomically (tmp + rename)
 response.json  device → client   {id, ok, result | error}
 ```
 
-The client re-sends the press every 150 ms until a response arrives. The component answers each request id once, and the client sends one request at a time.
+One request, step by step:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as MCP client
+  participant S as studio-one-mcp server
+  participant M as mailbox folder
+  participant B as IAC Driver (MIDI)
+  participant D as MCP Bridge device in Studio One
+  C->>S: tool call, e.g. live_set_channel
+  S->>M: read status.json (is the bridge loaded?)
+  S->>M: write request.json {id, op, args} (tmp file, then rename)
+  loop every 150 ms until answered (5 s timeout)
+    S->>B: note 119 (the doorbell)
+    B->>D: trigger toggles the bridgeTick parameter
+  end
+  D->>M: refresh status.json (heartbeat)
+  D->>M: read request.json
+  Note over D: a new id? run the op in Studio One. An id already answered is skipped, so repeat presses are harmless.
+  D->>M: write response.json {id, ok, result | error}
+  loop every 20 ms
+    S->>M: read response.json
+  end
+  Note over S: the response id matches the request id
+  S->>C: result, or the error as a tool error
+```
+
+The client re-sends the press every 150 ms until a response arrives. The component answers each request id once, and the client sends one request at a time (the mailbox has a single slot).
+
+For note edits (`live_edit_notes`) there is one more hop inside Studio One, described under [Editing notes](#editing-notes): the device writes the operations to `edit-request.json`, runs the **MCP Edit** command, and reads `edit-result.json` before it writes its response.
 
 Two rules for anything that runs inside Studio One, both learned on 5.5.2:
 
