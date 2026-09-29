@@ -17,10 +17,11 @@ import { midiPort } from './midi.js';
 import { pluginParamNames } from './plugins.js';
 import { arranger, listMacros, runMacro } from './arranger.js';
 import { tempo } from './tempo.js';
-import { trackEdit } from './tracks.js';
+import { trackEdit, addBus } from './tracks.js';
 import { recordSetup } from './record.js';
 import { snapshot } from './snapshots.js';
 import { bounce } from './bounce.js';
+import { diffSongs } from './diff.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -76,6 +77,28 @@ server.tool(
 );
 
 server.tool(
+  'song_diff',
+  "What changed between two saves of a song: tempo, meter, markers, sections, tracks (added, removed, renamed, active take, events, notes), mixer (level, pan, mute, solo, automation mode, output, plug-ins and their saved settings) and automation envelopes. Compares `song` with `against` (default: the newest autosave in the song's History folder), older to newer by file time, so by default it answers \"what have I changed since I saved?\" (or, if the save is newer, since the last autosave). Both take a title or a .song path; paths from song_history work.",
+  { song: z.string(), against: z.string().optional() },
+  guard(({ song, against }) => {
+    const main = resolveSong(song).path;
+    let other;
+    if (against) other = resolveSong(against).path;
+    else {
+      const history = join(songFolder(main), 'History');
+      const saves = existsSync(history)
+        ? readdirSync(history).filter((f) => f.endsWith('.song')).map((f) => join(history, f)).filter((p) => p !== main).sort((x, y) => statSync(y).mtimeMs - statSync(x).mtimeMs)
+        : [];
+      if (!saves.length) throw new Error(`no autosaves to compare ${song} against; pass against`);
+      other = saves[0];
+    }
+    const [from, to] = statSync(other).mtimeMs <= statSync(main).mtimeMs ? [other, main] : [main, other];
+    const changes = diffSongs(readSong(from), readSong(to));
+    return { from, to, changes: changes.length, diff: changes };
+  }),
+);
+
+server.tool(
   'live_status',
   'Is a running Studio One reachable through the MCP Bridge device? Explains how to fix it if not.',
   {},
@@ -93,17 +116,17 @@ server.tool(
 
 server.tool(
   'live_channels',
-  'List the mixer channels of the song open in Studio One right now, with live volume, pan, mute, solo, record-arm and automation mode.',
+  'List the mixer channels of the song open in Studio One right now, with live volume, pan, mute, solo, record-arm, input monitoring, automation mode, and routing (input and output names; read-only).',
   {},
   guard(() => call('channels')),
 );
 
 server.tool(
   'live_set_channel',
-  'Change one mixer channel in the running Studio One. Values are Studio One normalised values (volume/pan 0..1, pan 0.5 = centre; mute/solo/recordArmed 0 or 1). Returns before/after.',
+  'Change one mixer channel in the running Studio One. Values are Studio One normalised values (volume/pan 0..1, pan 0.5 = centre; mute/solo/recordArmed/monitor 0 or 1). Returns before/after.',
   {
     channel: z.string().describe('Exact channel label as shown in the console'),
-    field: z.enum(['volume', 'pan', 'mute', 'solo', 'recordArmed']),
+    field: z.enum(['volume', 'pan', 'mute', 'solo', 'recordArmed', 'monitor']),
     value: z.number(),
   },
   guard((a) => call('setChannel', a)),
@@ -245,9 +268,24 @@ server.tool(
 
 server.tool(
   'live_takes',
-  "A track's takes (layers) in the running Studio One: list them, switch to the next/previous take, or unpack all takes to separate tracks. Returns the number of takes and the names of the clips now playing. Takes do not wrap: next on the last take (or previous on the first) changes nothing.",
-  { track: z.string(), action: z.enum(['list', 'next', 'previous', 'unpack']).optional() },
-  guard((a) => call('takes', a)),
+  "A track's takes (layers) in the running Studio One: list them (with their names from the last save), switch to the next/previous take or to take N (goto, 1-based), add an empty take or duplicate the active one (each one live_undo), unpack all takes to separate tracks, or recall a retrospective recording (instrument tracks: what you played while not recording). Returns the number of takes and the names of the clips now playing. Takes do not wrap: next on the last take (or previous on the first) changes nothing.",
+  {
+    track: z.string(),
+    action: z.enum(['list', 'next', 'previous', 'goto', 'add', 'duplicate', 'unpack', 'retrospective']).optional(),
+    take: z.number().int().optional().describe('For goto: 1-based take number'),
+  },
+  guard(async (a) => {
+    const r = await call('takes', a);
+    if ((a.action || 'list') !== 'list') return r;
+    try {
+      const { fileUrl } = await call('song');
+      const saved = fileUrl && existsSync(fileURLToPath(fileUrl)) ? readSong(fileURLToPath(fileUrl)).tracks.find((t) => t.name === a.track) : null;
+      if (saved?.layers) r.saved = { takes: saved.layers.map((l) => l.name), active: saved.layers.findIndex((l) => l.active) + 1 };
+    } catch {
+      // names are a bonus; the live answer stands without them
+    }
+    return r;
+  }),
 );
 
 server.tool(
@@ -259,7 +297,7 @@ server.tool(
 
 server.tool(
   'live_undo',
-  'Undo the last edit(s) in the running Studio One.',
+  "Undo the last edit(s) in the running Studio One; returns how many ran (a refused undo counts 0). Check the result rather than counting steps: mixer parameter changes (volume, monitor, plug-in parameters, automation mode...) become undo steps that are recorded late and merge, so an undo can land on one of those instead of the edit you just made. Undo again until your edit is gone.",
   { steps: z.number().int().optional() },
   guard((a) => call('undo', a)),
 );
@@ -491,6 +529,13 @@ server.tool(
     noteErase: z.boolean().optional(),
   },
   guard((a) => recordSetup(call, a)),
+);
+
+server.tool(
+  'live_add_bus',
+  'Create a bus for some tracks (their outputs are routed into it) or a VCA that controls them, in the running Studio One. Returns the new channel and, for a bus, where each track now goes. One live_undo removes it. The track selection is kept.',
+  { tracks: z.array(z.string()).describe('Exact track names'), kind: z.enum(['bus', 'vca']).optional() },
+  guard((a) => addBus(call, a)),
 );
 
 server.tool(

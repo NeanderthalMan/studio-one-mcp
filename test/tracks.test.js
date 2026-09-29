@@ -1,7 +1,7 @@
 // live_track_edit over a fake bridge.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { trackEdit, toArgb } from '../src/tracks.js';
+import { trackEdit, toArgb, addBus } from '../src/tracks.js';
 
 function bridge() {
   const tracks = [
@@ -43,6 +43,26 @@ test('rename and color go through the channel; before values reported', async ()
   await assert.rejects(trackEdit(b.call, { track: 'Dup', action: 'rename', name: 'x' }), /ambiguous/);
   await assert.rejects(trackEdit(b.call, { track: 'Nope', action: 'color', color: '#000000' }), /no track named Nope/);
   await assert.rejects(trackEdit(b.call, { track: 'Gtr', action: 'rename' }), /needs name/);
+});
+
+test('addBus: selects the tracks, runs the command, reports the new channel and routing, restores selection', async () => {
+  const b = bridge();
+  let chans = [{ label: 'Vox', output: 'Main' }, { label: 'Gtr', output: 'Main' }];
+  const call = async (op, a) => {
+    if (op === 'channels') return chans;
+    if (op === 'command' && a.name === 'Add Bus for Selected Channels') {
+      chans = [...chans.map((c) => ({ ...c, output: 'Bus 1' })), { label: 'Bus 1', output: 'Main' }];
+      return { executed: true };
+    }
+    return b.call(op, a);
+  };
+  const r = await addBus(call, { tracks: ['Vox', 'Gtr'] });
+  assert.deepEqual(r.added, ['Bus 1']);
+  assert.deepEqual(r.routed, [{ channel: 'Vox', output: 'Bus 1' }, { channel: 'Gtr', output: 'Bus 1' }]);
+  assert.deepEqual(b.selected(), ['Gtr'], 'selection put back');
+  await assert.rejects(addBus(call, { tracks: [] }), /one or more/);
+  await assert.rejects(addBus(call, { tracks: ['Vox'], kind: 'aux' }), /bus or vca/);
+  await assert.rejects(addBus(call, { tracks: ['Nope'] }), /no track named Nope/);
 });
 
 test('remove selects the track, removes it and keeps the rest of the selection', async () => {

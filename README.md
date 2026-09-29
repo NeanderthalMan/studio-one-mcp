@@ -18,6 +18,7 @@ Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Window
 | `song_list` | Songs on disk, newest first. This includes songs that exist only as autosaves. |
 | `song_read` | One song, as a `summary` (one line per track) or `full` (every take and clip, instrument notes, each plug-in's saved settings, automation envelopes). Positions are given as bar/beat and as seconds. |
 | `song_history` | A song's autosaves, for comparing versions. |
+| `song_diff` | What changed between two saves: tempo, meter, markers, sections, tracks (added, removed, renamed, takes, events, notes), mixer (levels, mute/solo, automation mode, output, plug-ins and their settings) and automation. By default it compares the song with its newest autosave, older to newer. |
 | `live_status` | Whether the bridge is reachable. If not, it says why. |
 | `live_song` | The open song as it is right now, unsaved changes included: title, file path, transport (playing, recording, loop, position, tempo, loop range, precount, preroll), track count, selected tracks. |
 | `live_tracks` | Tracks with media type, colour, mixer channel, number of takes, selection, and events (name, start, end, length in seconds, muted). |

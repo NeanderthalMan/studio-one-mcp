@@ -553,18 +553,35 @@ class Bridge {
         return found.find(t => t.name === name) || null;
     }
 
+    // Takes (layers). Scripts see only how many there are, not which is active, so
+    // goto walks: "previous" count-1 times reaches take 1 (takes do not wrap), then
+    // "next" take-1 times. add (new empty take, made active) and duplicate (copy of
+    // the active take) are one undo step each, no dialog (5.5.2).
     takes(args) {
-        const actions = { list: null, next: "Activate Next Layer", previous: "Activate Previous Layer", unpack: "Unpack Layers to Tracks" };
+        const actions = { list: null, next: "Activate Next Layer", previous: "Activate Previous Layer", unpack: "Unpack Layers to Tracks", goto: null, add: "Add Layer", duplicate: "Duplicate Layer", retrospective: "Recall Retrospective Recording" };
         const action = args.action || "list";
         if (!(action in actions)) return fail("action must be one of " + Object.keys(actions).join(", "));
-        if (action !== "list") {
+        if (action === "goto") {
+            const info = this.trackInfo(args.track);
+            if (!info) return fail("no track named " + args.track);
+            const count = info.takes || 1;
+            if (typeof args.take !== "number" || args.take < 1 || args.take > count) return fail("take must be 1 to " + count);
+            const r = this.withTrack(args.track, () => {
+                for (let i = 1; i < count; i++) this.command({ category: "Track", name: actions.previous });
+                for (let i = 1; i < args.take; i++) this.command({ category: "Track", name: actions.next });
+                return { ok: true };
+            });
+            if (isFail(r)) return r;
+        } else if (action !== "list") {
             const r = this.withTrack(args.track, () => this.run("Track", actions[action]));
             if (isFail(r)) return r;
         } else if (!this.trackInfo(args.track)) {
             return fail("no track named " + args.track);
         }
         const t = this.trackInfo(args.track);
-        return { track: args.track, action: action, takes: t ? t.takes : null, activeEvents: t ? t.events.map(e => e.name) : [] };
+        const out = { track: args.track, action: action, takes: t ? t.takes : null, activeEvents: t ? t.events.map(e => e.name) : [] };
+        if (action === "goto") out.active = args.take;
+        return out;
     }
 
     trackState(args) {

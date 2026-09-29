@@ -25,7 +25,7 @@ const songXml = `﻿<?xml version="1.0" encoding="UTF-8"?>
         <MarkerEvent markerType="2" timeFormat="2" name="Start"/>
         <MarkerEvent start="16" timeFormat="2" name="Chorus"/>
       </MarkerTrack>
-      <MediaTrack mediaType="Audio" name="Vox" color="FFFFC693" activeLayer="1" timeFormat="2">
+      <MediaTrack mediaType="Audio" name="Vox" trackID="{TR-VOX}" color="FFFFC693" activeLayer="1" timeFormat="2">
         <SpeakerSetup x:id="trackFormat" type="Mono"/>
         <UID x:id="channelID" uid="{CH-VOX}"/>
         <List x:id="Layers">
@@ -103,7 +103,7 @@ export function encodeUbjson(v) {
 // track "Keys" whose part shows clip beats 4..12 at song beat 4, a saved Pro EQ
 // state for the Vox insert, Vox in automation Read, and a Vox volume envelope.
 const keysTrack = `
-      <MediaTrack mediaType="Music" name="Keys" timeFormat="2">
+      <MediaTrack mediaType="Music" name="Keys" trackID="{TR-KEYS}" timeFormat="2">
         <List x:id="Layers"><Attributes id="0" layerName="Keys.1"><List x:id="Events">
           <MusicPart clipID="{CLIP-M}" timeFormat="2" start="4" length="8" offset="4" name="Keys"/>
         </List></Attributes></List>

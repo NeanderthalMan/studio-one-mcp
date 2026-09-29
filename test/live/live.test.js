@@ -12,7 +12,7 @@ import { bridgeStatus, call } from '../../src/bridge.js';
 import { pluginParamNames } from '../../src/plugins.js';
 import { arranger, listMacros, runMacro } from '../../src/arranger.js';
 import { tempo } from '../../src/tempo.js';
-import { trackEdit } from '../../src/tracks.js';
+import { trackEdit, addBus } from '../../src/tracks.js';
 import { readSong } from '../../src/song.js';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync } from 'node:fs';
@@ -226,6 +226,36 @@ test('selectEvents + Event/Mute Events + Unmute: events toggled and restored', a
 
 // ---- loop, takes, undo, track state, event edits, add track, meters ----------------
 
+// Undo until the test's own edit is gone (at most `max` steps), checking after each.
+// Why not one undo: on 5.5.2 a mixer parameter set and set back (an earlier test's
+// restore) becomes an undo step that changes nothing and is recorded late, on top
+// of later edits, so one undo removed that instead of the edit just made. Our edit is
+// on the stack, and anything above it is newer, i.e. from the tests, so undoing
+// until it is gone never reaches edits made before the run.
+const counts = async () => ({ tracks: (await call("song")).trackCount, channels: (await call("channels")).length });
+
+// `baseline`: counts() before the test made its edit. Undo steps that are the
+// invisible parameter ones must not change the counts; once our edit is gone the
+// counts must be back at the baseline. Anything else means an undo reached some
+// other edit: it is redone and the test fails, rather than digging further.
+async function undoUntil(isUndone, what, baseline, max = 8) {
+  const withEdit = await counts();
+  for (let i = 1; i <= max; i++) {
+    await call("undo", {}); // a refused undo (done 0) changes nothing, so trying again is safe
+    const now = await counts();
+    if (await isUndone()) {
+      if (now.tracks === baseline.tracks && now.channels === baseline.channels) return i;
+      await call("redo", {});
+      throw new Error(`removing ${what} changed the song unexpectedly (redone): ${JSON.stringify({ baseline, now })}`);
+    }
+    if (now.tracks !== withEdit.tracks || now.channels !== withEdit.channels) {
+      await call("redo", {});
+      throw new Error(`an undo reached another edit while removing ${what} (redone): ${JSON.stringify({ withEdit, now })}`);
+    }
+  }
+  throw new Error(`${what} still there after ${max} undos`);
+}
+
 const uniqueNamed = async (pred = () => true) => {
   const tracks = await call('tracks');
   const names = tracks.map((x) => x.name);
@@ -273,6 +303,35 @@ test('takes: next then previous restores the active take', async (t) => {
   }
 });
 
+test('takes goto: every take by number, then back to the one that was active', async (t) => {
+  const track = await uniqueNamed((x) => x.takes > 1);
+  if (!track) return t.skip('no track with more than one take');
+  const start = (await call('takes', { track: track.name })).activeEvents.join();
+  const seen = [];
+  for (let n = 1; n <= track.takes; n++) seen.push((await call('takes', { track: track.name, action: 'goto', take: n })).activeEvents.join());
+  const back = seen.indexOf(start) + 1;
+  assert.ok(back > 0, `the starting take is one of the ${track.takes}`);
+  assert.equal((await call('takes', { track: track.name, action: 'goto', take: back })).activeEvents.join(), start);
+});
+
+test('takes add and duplicate: one more take each, one undo each, active take kept', async (t) => {
+  const track = await uniqueNamed((x) => x.takes > 1);
+  if (!track) return t.skip('no track with more than one take');
+  const before = await call('takes', { track: track.name });
+  for (const action of ['add', 'duplicate']) {
+    const base = await counts();
+    const r = await call('takes', { track: track.name, action });
+    try {
+      assert.equal(r.takes, before.takes + 1, `${action}: one more take`);
+    } finally {
+      await undoUntil(async () => (await call('takes', { track: track.name })).takes === before.takes, `the ${action}ed take`, base);
+    }
+    const after = await call('takes', { track: track.name });
+    assert.deepEqual([after.takes, after.activeEvents], [before.takes, before.activeEvents], `${action} undone`);
+  }
+  for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+});
+
 // Mute is not on Studio One's undo stack: an undo here reverts the edit before it (it
 // once flipped the take the test above had just restored). Toggle back instead.
 test('trackState mute toggles the channel, and toggling again restores it', async () => {
@@ -293,11 +352,12 @@ test('editEvents split, then undo restores the events', async (t) => {
   if (!track) return t.skip('no track with an event longer than 2 s');
   const ev = track.events.find((e) => e.end - e.start > 2);
   const sel0 = (await call('song')).selectedTracks;
+  const base = await counts();
   const r = await call('editEvents', { track: track.name, action: 'split', at: ev.start + 1 });
   try {
     assert.equal(r.events.length, track.events.length + 1, 'one more event after the split');
   } finally {
-    await call('undo', {});
+    await undoUntil(async () => (await call('tracks', { name: track.name })).find((x) => x.name === track.name).eventCount === track.eventCount, 'the split', base);
     // The undo re-selects the split track; put the selection back.
     for (const [i, name] of sel0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
@@ -307,11 +367,12 @@ test('editEvents split, then undo restores the events', async (t) => {
 test('addTrack, then undo removes it; selection restored', async () => {
   const song0 = await call('song');
   const n0 = song0.trackCount;
+  const base = await counts();
   const r = await call('addTrack', { type: 'audioMono' });
   try {
     assert.equal(r.trackCount, n0 + 1);
   } finally {
-    await call('undo', {});
+    await undoUntil(async () => (await call('song')).trackCount === n0, 'the added track', base);
     for (const [i, name] of song0.selectedTracks.entries()) await call('selectTrack', { name, exclusive: i === 0 });
   }
   assert.equal((await call('song')).trackCount, n0);
@@ -495,6 +556,39 @@ test('plug-in snapshot: save, change a parameter, restore brings it back', async
   }
   const back = (await call('pluginParams', { ...at, names: [p.name] })).params[0];
   assert.equal(back.value, p.value);
+});
+
+test('routing and monitor: output names on tracks; monitor set and restored', async () => {
+  const now = await call('channels');
+  const tracksWithOut = now.filter((c) => typeof c.output === 'string' && c.output !== '');
+  assert.ok(tracksWithOut.length > 0, 'some channels report an output name');
+  for (const c of tracksWithOut) assert.notEqual(c.output, '-1', `${c.label}: a name, not a list index`);
+  const ch = now.find((c) => c.label === testChannel.label);
+  if (ch.monitor === null) return;
+  try {
+    assert.equal((await call('setChannel', { channel: ch.label, field: 'monitor', value: ch.monitor ? 0 : 1 })).after, ch.monitor ? 0 : 1);
+  } finally {
+    assert.equal((await call('setChannel', { channel: ch.label, field: 'monitor', value: ch.monitor })).after, ch.monitor);
+  }
+});
+
+// One undo step when checked by hand; in a run it can take more (see undoUntil).
+test('add a bus for one track, then undo removes it and restores the routing', async () => {
+  const track = await uniqueNamed((x) => x.channel && x.mediaType === 'Audio');
+  const chans0 = await call('channels');
+  const out0 = chans0.find((c) => c.label === track.channel).output;
+  const base = await counts();
+  const r = await addBus(call, { tracks: [track.name] });
+  try {
+    assert.equal(r.added.length, 1, `one new channel: ${r.added}`);
+    assert.equal(r.routed[0].output, r.added[0], 'the track now goes to the new bus');
+  } finally {
+    await undoUntil(async () => !(await call('channels')).some((c) => c.label === r.added[0]), 'the new bus', base);
+    for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  }
+  const chans1 = await call('channels');
+  assert.deepEqual(chans1.map((c) => c.label), chans0.map((c) => c.label), 'the bus is gone');
+  assert.equal(chans1.find((c) => c.label === track.channel).output, out0);
 });
 
 // Record modes are not exercised: they cannot be read, so they could not be restored.

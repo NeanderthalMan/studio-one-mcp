@@ -22,6 +22,31 @@ async function restoreSelection(call, names) {
   for (const [i, name] of names.entries()) await call('selectTrack', { name, exclusive: i === 0 }).catch(() => {});
 }
 
+// A bus (the tracks' outputs are routed into it) or a VCA (controlling them) for
+// some tracks, through Track/Add Bus|VCA for Selected Channels: no dialog, one
+// undo step (checked on 5.5.2). The track selection is put back.
+export async function addBus(call, { tracks, kind = 'bus' }) {
+  const cmd = { bus: 'Add Bus for Selected Channels', vca: 'Add VCA for Selected Channels' }[kind];
+  if (!cmd) throw new Error('kind must be bus or vca');
+  if (!Array.isArray(tracks) || !tracks.length) throw new Error('tracks: one or more track names');
+  const chans = [];
+  for (const name of tracks) chans.push((await findTrack(call, name)).channel);
+  const { selectedTracks } = await call('song');
+  const before = new Set((await call('channels')).map((c) => c.label));
+  let r;
+  try {
+    for (const [i, name] of tracks.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+    r = await call('command', { category: 'Track', name: cmd });
+  } finally {
+    await restoreSelection(call, selectedTracks);
+  }
+  if (!r.executed) throw new Error(`Track/${cmd} did not run`);
+  const after = await call('channels');
+  const added = after.filter((c) => !before.has(c.label)).map((c) => c.label);
+  const routed = after.filter((c) => chans.includes(c.label)).map((c) => ({ channel: c.label, output: c.output }));
+  return { kind, added, ...(kind === 'bus' ? { routed } : {}), note: 'One live_undo removes it (and puts the routing back).' };
+}
+
 export async function trackEdit(call, { track, action, name, color }) {
   const t = await findTrack(call, track);
   switch (action) {
