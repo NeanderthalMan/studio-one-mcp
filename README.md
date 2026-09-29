@@ -45,6 +45,7 @@ Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Window
 | `live_macros` / `live_run_macro` | The macros (built-in and your own) by title, and run one by title, or only check whether it is enabled. |
 | `live_tempo` | The tempo at any positions, set the tempo of the segment containing a position, or insert a tempo change (two undo steps). Studio One must be stopped; the playhead is put back. |
 | `live_notes` | Notes in an instrument track's parts: pitch (number and name, middle C = C3), velocity 0 to 127, start, end and length in seconds, start in beats. Read-only. |
+| `live_edit_notes` | Edit an instrument track's notes: transpose, set or change velocity, move, change length, delete (with a filter), add notes. Filters by pitch and beat range. Runs through a small edit-task extension installed with the device, so no dialog opens. |
 | `live_track_edit` | Rename, recolour (`"#rrggbb"`) or remove a track by name. Rename and colour are not on the undo stack; remove is. |
 | `live_bounce` | Bounce all events on a track, in place or to a new track (the originals are muted), without dialogs. One undo reverts it; the rendered file stays in the song's Bounces folder. Mixdown and stem export open dialogs, so they are not offered. |
 | `live_record` | Record, which writes a take into the song. Only runs with `confirm: true`. It can arm a track first, start from a position, set precount, and stop after N seconds. |

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { unzipSync, strFromU8 } from 'fflate';
 
 const script = fileURLToPath(new URL('../scripts/install-device.js', import.meta.url));
 
@@ -50,6 +51,18 @@ test('reinstall is idempotent and --uninstall removes the folder', () => {
   assert.ok(existsSync(join(target, 'StudioOneMCP.device')));
   run(['--profile', profile, '--uninstall'], home);
   assert.equal(existsSync(target), false);
+  assert.equal(existsSync(join(profile, 'Extensions', 'studio-one-mcp.edittasks')), false, 'edit tasks removed too');
+});
+
+test('installs the edit-task extension: metadata plus a ZIP package with the mailbox config', () => {
+  const { profile, home } = sandbox();
+  run(['--profile', profile], home);
+  const ext = join(profile, 'Extensions', 'studio-one-mcp.edittasks');
+  for (const f of ['metainfo.xml', 'installdata.xml', 'scripts/studio-one-mcp.package']) assert.ok(existsSync(join(ext, f)), f);
+  const files = unzipSync(readFileSync(join(ext, 'scripts', 'studio-one-mcp.package')));
+  assert.deepEqual(Object.keys(files).sort(), ['McpEdit.js', 'McpEditConfig.js', 'classfactory.xml', 'metainfo.xml']);
+  const cfg = strFromU8(files['McpEditConfig.js']);
+  assert.equal(JSON.parse(cfg.slice(cfg.indexOf('{'), cfg.lastIndexOf('}') + 1)).mailbox, `file://${home}/mailbox/`);
 });
 
 test('missing profile is a clear error', () => {

@@ -175,6 +175,41 @@ server.tool(
   }),
 );
 
+const NOTE_FILTER = z
+  .object({
+    pitch: z.number().int().optional(),
+    pitches: z.array(z.number().int()).optional(),
+    from: z.number().optional().describe('Start beat, inclusive'),
+    to: z.number().optional().describe('Start beat, exclusive'),
+  })
+  .optional()
+  .describe('Which notes (default: all). Beats as live_notes reports them.');
+
+server.tool(
+  'live_edit_notes',
+  "Edit the notes of an instrument track's parts in the running Studio One, through the MCP Edit task (installed with the device). Operations run in order: transpose {semitones}, velocity {set 1-127 | add}, move {beats}, length {set beats | scale}, delete (needs a filter), add {notes: [{pitch, beat, length, velocity}]}. Each can take a filter (pitch, pitches, from/to beats). Beats are the ones live_notes reports. Returns what each operation touched and the notes afterwards. One live_undo per operation, usually; check with live_notes.",
+  {
+    track: z.string(),
+    ops: z.array(
+      z.object({
+        op: z.enum(['transpose', 'velocity', 'move', 'length', 'delete', 'add']),
+        filter: NOTE_FILTER,
+        semitones: z.number().int().optional(),
+        set: z.number().optional(),
+        add: z.number().optional(),
+        beats: z.number().optional(),
+        scale: z.number().optional(),
+        notes: z.array(z.object({ pitch: z.number().int(), beat: z.number(), length: z.number(), velocity: z.number().int().optional() })).optional(),
+      }),
+    ),
+  },
+  guard(async ({ track, ops }) => {
+    const r = await call('editNotes', { track, ops });
+    for (const p of r.parts || []) for (const n of p.notes) if (typeof n.pitch === 'number') n.note = noteName(n.pitch);
+    return r;
+  }),
+);
+
 server.tool(
   'live_select_track',
   'Select a track by exact name in the running Studio One, so that selection-based commands (live_command) act on it. Replaces the selection unless exclusive is false.',

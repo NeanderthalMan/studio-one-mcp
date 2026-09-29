@@ -516,6 +516,31 @@ test('notes: an instrument part reads back with pitches, velocities and times in
   }
 });
 
+test('edit notes: transpose one note and set a velocity through the MCP Edit task, then undo', async (t) => {
+  const music = (await call('tracks')).find((x) => x.mediaType === 'Music' && x.eventCount > 0);
+  if (!music) return t.skip('no instrument track with a part');
+  const read = async () => (await call('notes', { track: music.name })).parts.flatMap((p) => p.notes.map((n) => `${n.pitch}@${n.beat}v${n.velocity}`));
+  const before = await read();
+  if (!before.length) return t.skip(`${music.name} has no notes`);
+  const first = (await call('notes', { track: music.name })).parts.find((p) => p.notes.length).notes[0];
+  const base = await counts();
+  const r = await call('editNotes', {
+    track: music.name,
+    ops: [
+      { op: 'transpose', semitones: 1, filter: { pitch: first.pitch, from: first.beat - 0.001, to: first.beat + 0.001 } },
+      { op: 'velocity', set: first.velocity === 64 ? 65 : 64, filter: { from: first.beat - 0.001, to: first.beat + 0.001 } },
+    ],
+  });
+  try {
+    assert.deepEqual(r.applied, [{ op: 'transpose', notes: 1 }, { op: 'velocity', notes: 1 }]);
+    assert.deepEqual(r.errors, []);
+    const edited = r.parts.flatMap((p) => p.notes).find((n) => Math.abs(n.beat - first.beat) < 0.001);
+    assert.deepEqual([edited.pitch, edited.velocity], [first.pitch + 1, first.velocity === 64 ? 65 : 64]);
+  } finally {
+    await undoUntil(async () => (await read()).join() === before.join(), 'the note edits', base);
+  }
+});
+
 // A scratch track is added, renamed, recoloured and removed: the song ends as it began
 // (two undo steps: add, remove). Rename and colour are not undo steps.
 test('track edit: rename, colour and remove a scratch track; selection kept', async () => {
