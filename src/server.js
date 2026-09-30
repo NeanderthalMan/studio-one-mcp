@@ -17,7 +17,11 @@ import { midiPort } from './midi.js';
 import { pluginParamNames } from './plugins.js';
 import { arranger, listMacros, runMacro } from './arranger.js';
 import { tempo } from './tempo.js';
-import { trackEdit, addBus } from './tracks.js';
+import { trackEdit, addBus, trackTask, addInstrumentTrack, addPlugin, addFxSend } from './tracks.js';
+import { liveEvents } from './events.js';
+import { timeSignature } from './signatures.js';
+import { writeAutomation } from './automation.js';
+import { toSeconds } from './time.js';
 import { recordSetup } from './record.js';
 import { snapshot } from './snapshots.js';
 import { mixSnapshot } from './mixsnap.js';
@@ -245,37 +249,67 @@ server.tool(
   guard(({ position_seconds, position_bars, ...a }) => call('setTransport', { ...a, positionSeconds: position_seconds, positionBars: position_bars })),
 );
 
-// Marker names are not exposed live; take them from the last save by position.
-function nameMarkers(markers, fileUrl) {
-  let saved = [];
+// Marker names, live from the marker track (MCP Track Edit task); if the task is
+// not there, from the last save by position.
+async function markerNames() {
   try {
-    if (fileUrl && existsSync(fileURLToPath(fileUrl))) saved = readSong(fileURLToPath(fileUrl)).markers;
+    return (await trackTask(call, { op: 'markers' })).markers;
   } catch {
-    saved = [];
+    try {
+      const { fileUrl } = await call('song');
+      return fileUrl && existsSync(fileURLToPath(fileUrl)) ? readSong(fileURLToPath(fileUrl)).markers : [];
+    } catch {
+      return [];
+    }
   }
-  return markers.map((m) => {
-    const hit = saved.find((x) => Math.abs(x.seconds - m.seconds) < 0.01);
-    return { ...m, name: hit ? hit.name : null };
-  });
 }
 
 async function liveMarkers(result) {
-  const { fileUrl } = await call('song');
-  return { ...result, markers: nameMarkers(result.markers, fileUrl), note: 'Names come from the last save; a marker added since then has name null.' };
+  const names = await markerNames();
+  return {
+    ...result,
+    markers: result.markers.map((m) => {
+      const hit = names.find((x) => Math.abs(x.seconds - m.seconds) < 0.01);
+      return { ...m, name: hit ? hit.name : null };
+    }),
+  };
 }
 
 server.tool(
   'live_markers',
-  'Markers of the song open in Studio One right now: number, position (seconds and bar display) and name (from the last save). Briefly moves the playhead to read them and puts it back; refuses while playing. Only markers 1-20 are visible.',
+  'Markers of the song open in Studio One right now: number, position (seconds and bar display) and name. Briefly moves the playhead to read them and puts it back; refuses while playing. Only markers 1-20 are visible.',
   {},
   guard(async () => liveMarkers(await call('markers'))),
 );
 
 server.tool(
   'live_add_marker',
-  'Add a marker in the running Studio One at a position in seconds (default: the playhead). The playhead is left where it was.',
-  { seconds: z.number().optional() },
-  guard(async (a) => liveMarkers(await call('addMarker', a))),
+  'Add a marker in the running Studio One at a position (seconds or bars; default: the playhead), optionally named. The playhead is left where it was.',
+  { seconds: z.number().optional(), at: z.union([z.number(), z.string()]).optional().describe('Seconds or bars like "9.1.1.0" (instead of seconds)'), name: z.string().optional() },
+  guard(async ({ seconds, at, name }) => {
+    const where = at !== undefined ? await toSeconds(call, at) : seconds;
+    if (!name) return liveMarkers(await call('addMarker', { seconds: where }));
+    // Marker/Insert Named takes its name as an argument (no dialog when given).
+    const { transport } = await call('song');
+    try {
+      if (where !== undefined) await call('setTransport', { positionSeconds: where });
+      const r = await call('command', { category: 'Marker', name: 'Insert Named', args: ['Name', name] });
+      if (!r.executed) throw new Error('Marker/Insert Named did not run');
+    } finally {
+      await call('setTransport', { positionSeconds: transport.position.seconds });
+    }
+    return liveMarkers({ added: true, seconds: where ?? transport.position.seconds, name, markers: (await call('markers')).markers });
+  }),
+);
+
+server.tool(
+  'live_rename_marker',
+  'Rename a marker in the running Studio One, by number (as live_markers numbers them) or by its current name. One live_undo reverts it.',
+  { marker: z.union([z.number().int(), z.string()]), name: z.string() },
+  guard(async ({ marker, name }) => {
+    const r = await trackTask(call, { op: 'renameMarker', marker, name });
+    return { before: r.before, name, markers: await markerNames() };
+  }),
 );
 
 server.tool(
@@ -401,16 +435,30 @@ server.tool(
 
 server.tool(
   'live_plugins',
-  'The audio-effect plug-ins installed in the running Studio One, by name (PreSonus, VST and AU), optionally filtered. These are the names live_add_plugin takes.',
-  { filter: z.string().optional() },
+  'The plug-ins installed in the running Studio One, by name (PreSonus, VST and AU), optionally filtered: audio effects (default; the names live_add_plugin and live_add_send take) or instruments (kind "instrument"; the names live_add_instrument_track takes).',
+  { filter: z.string().optional(), kind: z.enum(['effect', 'instrument']).optional() },
   guard((a) => call('plugins', a, { timeoutMs: 10000 })),
 );
 
 server.tool(
   'live_add_plugin',
-  "Add a plug-in by name (from live_plugins) to a channel's inserts in the running Studio One. Returns the channel's inserts afterwards. Important: this cannot be undone with live_undo, and scripts cannot remove a plug-in, so removing it is manual (in Studio One) — bypass it with live_bypass_insert if you only need it out of the way. Ask before adding when the user has not clearly asked for it.",
+  "Add a plug-in by name (from live_plugins) to a channel's inserts in the running Studio One. Returns the channel's inserts afterwards. One live_undo removes it (the add goes through the MCP Track Edit task).",
   { channel: z.string().describe('Exact channel label'), plugin: z.string().describe('Plug-in name, e.g. "Pro EQ", "Compressor", "Room Reverb"') },
-  guard((a) => call('addPlugin', a, { timeoutMs: 10000 })),
+  guard((a) => addPlugin(call, a)),
+);
+
+server.tool(
+  'live_add_send',
+  "Add an effect send to a channel in the running Studio One: Studio One makes a new FX channel with the plug-in (by name, from live_plugins) and a send to it, e.g. a reverb or delay send. Returns the FX channel and the channel's sends (set the level with live_set_send). Sending to an existing bus or FX channel cannot be scripted. Not reliably undone by live_undo, so ask before adding when the user has not clearly asked for it.",
+  { channel: z.string().describe('Exact channel label'), plugin: z.string().describe('Effect for the new FX channel, e.g. "Room Reverb", "Analog Delay"') },
+  guard((a) => addFxSend(call, a)),
+);
+
+server.tool(
+  'live_add_instrument_track',
+  'Add an instrument track in the running Studio One with a new instance of an instrument (by name, from live_plugins with kind "instrument", e.g. "Mai Tai", "Presence"), optionally named. One live_undo removes the track and the instrument.',
+  { instrument: z.string(), name: z.string().optional().describe('Track name (default: the instrument name)') },
+  guard((a) => addInstrumentTrack(call, a)),
 );
 
 server.tool(
@@ -604,35 +652,47 @@ server.tool(
 
 server.tool(
   'live_track_edit',
-  'Edit a track by exact name in the running Studio One: rename (and its mixer channel), color ("#rrggbb"), remove, route (send its channel\'s output to a bus or output, by channel name), folder (move it into a folder track, creating it with create: true; the folder is expanded so the track stays visible to these tools), or renameEvents (name every event on it, numbered in time order if asked). Rename and colour are not on the undo stack; route is set back by routing to the "before" channel the result gives; remove, folder and renameEvents undo with live_undo. The track selection is kept. Route, folder and renameEvents run through the MCP Track Edit task installed with the device.',
+  'Edit a track by exact name in the running Studio One: rename (and its mixer channel), color ("#rrggbb"), remove, move (reorder: put it just before or after another track; both at the top level, not inside a folder), route (send its channel\'s output to a bus or output, by channel name), folder (move it into a folder track, creating it with create: true; the folder is expanded so the track stays visible to these tools), or renameEvents (name every event on it, numbered in time order if asked). Rename and colour are not on the undo stack; route is set back by routing to the "before" channel the result gives; remove, move, folder and renameEvents undo with live_undo. The track selection is kept. Move, route, folder and renameEvents run through the MCP Track Edit task installed with the device.',
   {
     track: z.string(),
-    action: z.enum(['rename', 'color', 'remove', 'route', 'folder', 'renameEvents']),
+    action: z.enum(['rename', 'color', 'remove', 'move', 'route', 'folder', 'renameEvents']),
     name: z.string().optional().describe('For rename and renameEvents'),
     color: z.string().optional().describe('For color: "#rrggbb"'),
     to: z.string().optional().describe('For route: destination channel name, e.g. "Bus 1" or "Main"'),
     folder: z.string().optional().describe('For folder: folder track name'),
     create: z.boolean().optional().describe('For folder: create the folder track if there is none by that name'),
     numbered: z.boolean().optional().describe('For renameEvents: add (01), (02)… in time order'),
+    before: z.string().optional().describe('For move: put the track just before this track'),
+    after: z.string().optional().describe('For move: put the track just after this track'),
   },
   guard((a) => trackEdit(call, a)),
 );
 
-// Sections of the open song as of its last save (the arranger track is not scriptable live).
+// Sections of the open song: live from the arranger track (MCP Track Edit task),
+// or as of the last save if the task is not there.
 async function savedSections() {
-  const { fileUrl } = await call('song');
-  const path = fileUrl ? fileURLToPath(fileUrl) : null;
-  const sections = path && existsSync(path) ? readSong(path).sections : [];
-  return () => sections;
+  try {
+    const { sections } = await trackTask(call, { op: 'sections' });
+    const live = sections.map((s) => ({ name: s.name, start: { seconds: s.start, bar: null }, end: { seconds: s.end } }));
+    return () => live;
+  } catch {
+    const { fileUrl } = await call('song');
+    const path = fileUrl ? fileURLToPath(fileUrl) : null;
+    const sections = path && existsSync(path) ? readSong(path).sections : [];
+    return () => sections;
+  }
 }
 
 server.tool(
   'live_arranger',
-  "Arranger sections in the running Studio One. sections: list them (numbered in song order, from the last save). goto: a section by number or name; while playing it jumps at the arranger's sync point, while stopped it moves the playhead to the section's start. next / previous: step while playing. syncMode: when jumps happen (off = immediately, 1bar, 2bars, 4bars, end of section); changing it is an undo step. createFromMarkers: make sections between markers (undo with live_undo). The loop range is kept.",
+  "Arranger sections in the running Studio One. sections: list them (numbered in song order). goto: a section by number or name; while playing it jumps at the arranger's sync point, while stopped it moves the playhead to the section's start. next / previous: step while playing. syncMode: when jumps happen (off = immediately, 1bar, 2bars, 4bars, end of section); changing it is an undo step. createFromMarkers: make sections between markers. Editing (each one live_undo): add {start, end, name}, rename {section, name}, resize {section, end}, move {section, start}, remove {section}; moving or resizing a section does not move the events under it. Positions are seconds or bars like \"9.1.1.0\". The loop range is kept.",
   {
-    action: z.enum(['sections', 'goto', 'next', 'previous', 'syncMode', 'createFromMarkers']),
-    section: z.union([z.number().int(), z.string()]).optional().describe('For goto: section number (1-16) or name'),
+    action: z.enum(['sections', 'goto', 'next', 'previous', 'syncMode', 'createFromMarkers', 'add', 'rename', 'resize', 'move', 'remove']),
+    section: z.union([z.number().int(), z.string()]).optional().describe('Section number or name (goto jumps while playing only to 1-16)'),
     sync: z.enum(['off', '1bar', '2bars', '4bars', 'end']).optional().describe('For syncMode'),
+    name: z.string().optional().describe('For add and rename'),
+    start: TIME.optional().describe('For add and move'),
+    end: TIME.optional().describe('For add and resize'),
   },
   guard(async (a) => arranger(call, await savedSections(), a)),
 );
@@ -649,6 +709,49 @@ server.tool(
   'Run a Studio One macro by title (from live_macros), e.g. "Normalize Audio & Set Peaks To -12". Macros are chains of commands that usually act on the selected events or tracks (see live_select_events / live_select_track) and can edit the song; most edits undo with live_undo. check_only reports whether it is enabled without running it.',
   { title: z.string(), check_only: z.boolean().optional() },
   guard(({ title, check_only }) => runMacro(call, { title, checkOnly: check_only })),
+);
+
+server.tool(
+  'live_events',
+  "One event (audio clip or instrument part) on a track in the running Studio One. list: the track's events, numbered in time order, with start/end in seconds and, for audio, gain (dB) and fade lengths. edit {event, and any of: to (new start), to_track (move it to another track), gain_db (set), add_gain_db, fade_in / fade_out (seconds, audio)}: one live_undo reverts the whole edit. duplicate {event, times}: copies right after it, times times. copy {event, to, to_track?}: pastes a copy at a position (uses the clipboard). Positions are seconds or bars like \"9.1.1.0\".",
+  {
+    track: z.string(),
+    action: z.enum(['list', 'edit', 'duplicate', 'copy']).optional(),
+    event: z.union([z.number().int(), z.string()]).optional().describe('Event number (from list) or name'),
+    to: TIME.optional(),
+    to_track: z.string().optional(),
+    gain_db: z.number().optional(),
+    add_gain_db: z.number().optional(),
+    fade_in: z.number().optional(),
+    fade_out: z.number().optional(),
+    times: z.number().int().optional(),
+  },
+  guard((a) => liveEvents(call, a)),
+);
+
+server.tool(
+  'live_time_signature',
+  'Time signatures in the running Studio One. at: the signature in effect at positions (seconds or bars; default the start). insert {bar, numerator, denominator}: a change at the start of a bar. remove {bar}: the change at that bar. Each insert or remove is one live_undo.',
+  {
+    action: z.enum(['at', 'insert', 'remove']),
+    at: z.union([TIME, z.array(TIME)]).optional(),
+    bar: z.number().int().optional(),
+    numerator: z.number().int().optional(),
+    denominator: z.number().int().optional(),
+  },
+  guard((a) => timeSignature(call, a)),
+);
+
+server.tool(
+  'live_write_automation',
+  "Write volume or pan automation on a channel in the running Studio One, along points [{at, db}] (volume in dB), [{at, pan}] (-1 left .. 1 right) or [{at, value}] (0..1 as live_set_channel takes it), straight lines between them. Studio One gives scripts no way to add envelope points, so this plays the range once in real time with the channel in Write mode and the fader following the curve (audible, and it replaces that parameter's automation in the range), then leaves the channel in Read. Only runs with confirm: true. For fades inside one clip, prefer live_events fade_in/fade_out.",
+  {
+    confirm: z.literal(true).describe('Must be true: the user asked for automation to be written'),
+    channel: z.string(),
+    parameter: z.enum(['volume', 'pan']).optional(),
+    points: z.array(z.object({ at: TIME, db: z.number().optional(), pan: z.number().optional(), value: z.number().optional() })),
+  },
+  guard(({ channel, parameter, points }) => writeAutomation(call, { channel, parameter, points })),
 );
 
 server.tool(

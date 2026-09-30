@@ -10,6 +10,7 @@
 // Every host member is checked before use: a throw, or a call on a missing
 // member, pops a modal Scripting Error dialog in Studio One.
 include_file("McpEditConfig.js");
+include_file("McpTrackOps.js");
 
 function mteUrl(name) { return Host.Url(McpEditConfig.mailbox + name); }
 
@@ -71,6 +72,28 @@ function mteTracks(context) {
 		for (var k = 0; k < out.length; k++) if (out[k] === t) seen = true;
 		if (!seen) out.push(t);
 	}
+	return out;
+}
+
+// JSON-safe view of a host object, for the eval probe (as the bridge's describe).
+function mteDescribe(value, depth) {
+	if (value === null || value === undefined) return value === undefined ? "<undefined>" : null;
+	var t = typeof value;
+	if (t === "number" || t === "boolean" || t === "string") return value;
+	if (t === "function") return "<function>";
+	if (Array.isArray(value)) return depth <= 0 ? "<array " + value.length + ">" : value.slice(0, 200).map(function (v) { return mteDescribe(v, depth - 1); });
+	try {
+		var json = JSON.stringify(value);
+		if (json !== undefined && json !== "{}") return JSON.parse(json);
+	} catch (_) {}
+	if (depth <= 0) return "<object>";
+	var out = {}, keys = [];
+	try { keys = Object.getOwnPropertyNames(value); } catch (_) {}
+	try { for (var k in value) if (keys.indexOf(k) < 0) keys.push(k); } catch (_) {}
+	for (var i = 0; i < keys.length && i < 200; i++) {
+		try { out[keys[i]] = mteDescribe(value[keys[i]], depth - 1); } catch (e) { out[keys[i]] = "<error " + e + ">"; }
+	}
+	if (!keys.length) { try { out["<string>"] = String(value); } catch (_) {} }
 	return out;
 }
 
@@ -165,6 +188,21 @@ function mteApply(context, ops) {
 					r.renamed.push(nm);
 				}
 			}
+		} else if (op.op === "eval") {
+			// { code, depth }: probe code run with this task's context (editor, functions,
+			// trackList), only when installed with --allow-eval. For exploring the model.
+			if (!McpEditConfig.allowEval) r.error = "eval is disabled; reinstall the device with --allow-eval";
+			else {
+				try {
+					var fn = new Function("context", "Host", String(op.code));
+					r.value = mteDescribe(fn(context, Host), typeof op.depth === "number" ? op.depth : 2);
+				} catch (ex) {
+					r.error = String(ex && ex.message || ex);
+				}
+			}
+		} else if (typeof mtoOps === "object" && mtoOps.hasOwnProperty(op.op)) {
+			var more = mtoOps[op.op](context, op) || {};
+			for (var key in more) if (more.hasOwnProperty(key)) r[key] = more[key];
 		} else {
 			r.error = "unknown op " + op.op;
 		}

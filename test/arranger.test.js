@@ -38,14 +38,14 @@ test('sections are numbered in song order; found by number, exact or partial nam
   assert.equal(findSection(list, 'bridge'), null);
 });
 
-test('goto while stopped locates the playhead to the saved start', async () => {
+test('goto while stopped locates the playhead to the section start', async () => {
   const b = bridge();
   const r = await arranger(b.call, () => SAVED, { action: 'goto', section: 'Chorus' });
   assert.equal(r.located, 2);
   assert.equal(b.t.position.seconds, 8);
   assert.ok(!b.calls.some(([op]) => op === 'command'));
-  await assert.rejects(arranger(b.call, () => SAVED, { action: 'goto', section: 5 }), /not in the last save/);
-  await assert.rejects(arranger(b.call, () => SAVED, { action: 'goto', section: 'Bridge' }), /no saved section named Bridge/);
+  await assert.rejects(arranger(b.call, () => SAVED, { action: 'goto', section: 5 }), /there is no section 5/);
+  await assert.rejects(arranger(b.call, () => SAVED, { action: 'goto', section: 'Bridge' }), /no section named Bridge/);
 });
 
 test('goto while playing uses the arranger jump and puts the loop range back', async () => {

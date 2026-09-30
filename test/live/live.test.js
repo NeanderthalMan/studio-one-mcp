@@ -12,7 +12,9 @@ import { bridgeStatus, call } from '../../src/bridge.js';
 import { pluginParamNames } from '../../src/plugins.js';
 import { arranger, listMacros, runMacro } from '../../src/arranger.js';
 import { tempo } from '../../src/tempo.js';
-import { trackEdit, addBus } from '../../src/tracks.js';
+import { trackEdit, addBus, trackTask, addPlugin, addInstrumentTrack } from '../../src/tracks.js';
+import { liveEvents } from '../../src/events.js';
+import { timeSignature } from '../../src/signatures.js';
 import { readSong } from '../../src/song.js';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync } from 'node:fs';
@@ -708,8 +710,6 @@ test('punch: set punch-in over a range, read it back, then off with the loop ran
   assert.deepEqual((await call('song')).transport.autopunch, t0.autopunch);
 });
 
-// addPlugin itself is not run here: a plug-in added by script cannot be removed by
-// script (so-bga), so the suite could not clean up. It was checked by hand (Pro EQ).
 test('plugins: the installed effects are listed by name, PreSonus ones included', async () => {
   const { plugins } = await call('plugins', {}, { timeoutMs: 10000 });
   assert.ok(plugins.length > 10, `${plugins.length} plug-ins`);
@@ -740,5 +740,141 @@ test('sends: set a level and restore it', async (t) => {
     assert.equal((await call('setSend', { channel: withSend.channel, index: s.index, level: s.level > 0.5 ? 0.25 : 0.75 })).send.level > 0, true);
   } finally {
     assert.equal((await call('setSend', { channel: withSend.channel, index: s.index, level: s.level })).send.level, s.level);
+  }
+});
+
+// ---- MCP Track Edit task: song structure, events, track order, instruments --------
+
+test('task reads: markers, sections and the time signature, live', async () => {
+  const [m, s, sig] = (await call('trackTask', { ops: [{ op: 'markers' }, { op: 'sections' }, { op: 'signatures', at: [0] }] })).results;
+  assert.ok(m.markers.some((x) => x.kind === 'start') && m.markers.some((x) => x.kind === 'end'), 'song start and end markers');
+  assert.deepEqual(m.markers.map((x) => x.number), m.markers.map((_, i) => i + 1));
+  assert.ok(Array.isArray(s.sections));
+  assert.ok(sig.signatures[0].numerator >= 1 && sig.signatures[0].denominator >= 1);
+});
+
+test('track move: put a track before the first one, undo puts it back', async () => {
+  const order = async () => (await call('tracks', { events: false })).map((x) => x.name);
+  const o0 = await order();
+  const top = (await call('tracks', { events: false })).filter((x) => o0.indexOf(x.name) === o0.lastIndexOf(x.name));
+  if (top.length < 3) return;
+  const [first, , mover] = top;
+  const base = await counts();
+  const r = await trackEdit(call, { track: mover.name, action: 'move', before: first.name });
+  try {
+    assert.equal(r.order.indexOf(mover.name) + 1, r.order.indexOf(first.name));
+  } finally {
+    await undoUntil(async () => (await order()).join() === o0.join(), 'the move', base);
+    for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  }
+});
+
+test('add plug-in is undoable now (DeviceEditFunctions), inserts restored', async () => {
+  const [rack0] = await call('inserts', { channel: testChannel.label });
+  const base = await counts();
+  const r = await addPlugin(call, { channel: testChannel.label, plugin: 'Pro EQ' });
+  try {
+    assert.equal(r.inserts.length, rack0.inserts.length + 1);
+  } finally {
+    await undoUntil(async () => (await call('inserts', { channel: testChannel.label }))[0].inserts.length === rack0.inserts.length, 'the plug-in', base);
+  }
+});
+
+test('instrument track: added with its instrument, one undo removes both', async () => {
+  const base = await counts();
+  const r = await addInstrumentTrack(call, { instrument: 'Mai Tai', name: 'MCP Test Keys' });
+  try {
+    assert.equal(r.track, 'MCP Test Keys');
+    assert.equal(r.connected, true);
+    assert.equal((await counts()).tracks, base.tracks + 1);
+  } finally {
+    await undoUntil(async () => (await counts()).tracks === base.tracks && (await counts()).channels === base.channels, 'the instrument track', base);
+    for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  }
+});
+
+test('events: move, gain and fade one audio event in one step, undo restores it', async (t) => {
+  const track = await uniqueNamed((x) => x.eventCount > 0 && x.mediaType === 'Audio');
+  if (!track) return t.skip('no audio track with events');
+  const list = async () => (await liveEvents(call, { track: track.name })).events;
+  const e0 = await list();
+  const last = e0[e0.length - 1];
+  const base = await counts();
+  const r = await liveEvents(call, { track: track.name, action: 'edit', event: last.number, to: last.start + 2, add_gain_db: -3, fade_in: 0.25 });
+  try {
+    assert.deepEqual(r.done, ['move', 'gain', 'fadeIn']);
+    assert.ok(Math.abs(r.after.start - (last.start + 2)) < 0.01);
+    assert.ok(Math.abs(r.after.gainDb - (last.gainDb - 3)) < 0.05);
+    assert.equal(r.after.fadeIn, 0.25);
+  } finally {
+    await undoUntil(async () => JSON.stringify(await list()) === JSON.stringify(e0), 'the event edit', base);
+  }
+});
+
+test('events: copy one onto an empty track at a bar, undo removes the copy', async (t) => {
+  const src = await uniqueNamed((x) => x.eventCount > 0 && x.mediaType === 'Audio');
+  const dst = await uniqueNamed((x) => x.eventCount === 0 && x.mediaType === 'Audio');
+  if (!src || !dst) return t.skip('needs an audio track with events and an empty one');
+  const t0 = (await call('song')).transport.position.seconds;
+  const base = await counts();
+  const r = await liveEvents(call, { track: src.name, action: 'copy', event: 1, to: '9.1.1.0', to_track: dst.name });
+  try {
+    assert.equal(r.added, 1);
+    assert.equal(r.events.length, 1);
+    assert.equal((await call('song')).transport.position.seconds, t0, 'playhead put back');
+  } finally {
+    await undoUntil(async () => (await liveEvents(call, { track: dst.name })).events.length === 0, 'the copy', base);
+    for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  }
+});
+
+test('arranger: add a named section past the end, rename it, undo both', async () => {
+  const names = async () => (await trackTask(call, { op: 'sections' })).sections.map((s) => `${s.name}@${s.start}`).join();
+  const s0 = await names();
+  const base = await counts();
+  const end = (await trackTask(call, { op: 'markers' })).markers.find((m) => m.kind === 'end').seconds;
+  try {
+    const add = await arranger(call, () => [], { action: 'add', start: end + 60, end: end + 64, name: 'MCP Test' });
+    assert.equal(add.added, 'MCP Test');
+    const ren = await arranger(call, () => [], { action: 'rename', section: 'MCP Test', name: 'MCP Test 2' });
+    assert.equal(ren.after.name, 'MCP Test 2');
+  } finally {
+    await undoUntil(async () => (await names()) === s0, 'the section', base);
+  }
+});
+
+test('markers: add a named one, rename it, undo both', async () => {
+  const t0 = (await call('song')).transport;
+  if (t0.playing) return;
+  const names = async () => (await trackTask(call, { op: 'markers' })).markers.map((m) => `${m.name}@${m.seconds}`).join();
+  const m0 = await names();
+  const base = await counts();
+  const at = 1.25;
+  try {
+    await call('setTransport', { positionSeconds: at });
+    assert.equal((await call('command', { category: 'Marker', name: 'Insert Named', args: ['Name', 'MCP Test'] })).executed, true);
+    await call('setTransport', { positionSeconds: t0.position.seconds });
+    assert.ok((await names()).includes('MCP Test@1.25'));
+    const r = await trackTask(call, { op: 'renameMarker', marker: 'MCP Test', name: 'MCP Test 2' });
+    assert.equal(r.before.name, 'MCP Test');
+    assert.ok((await names()).includes('MCP Test 2@1.25'));
+  } finally {
+    await call('setTransport', { positionSeconds: t0.position.seconds });
+    await undoUntil(async () => (await names()) === m0, 'the marker', base);
+  }
+});
+
+test('time signature: insert 7/8 at bar 9 (numbers: no dialog), then remove it', async () => {
+  const t0 = (await call('song')).transport;
+  if (t0.playing) return;
+  const [was] = (await timeSignature(call, { action: 'at', at: '9.1.1.0' })).signatures;
+  const [before8] = (await timeSignature(call, { action: 'at', at: '8.1.1.0' })).signatures;
+  if (`${was.numerator}/${was.denominator}` !== `${before8.numerator}/${before8.denominator}`) return; // a change is already there
+  const r = await timeSignature(call, { action: 'insert', bar: 9, numerator: 7, denominator: 8 });
+  try {
+    assert.deepEqual([r.now.numerator, r.now.denominator], [7, 8]);
+  } finally {
+    const back = await timeSignature(call, { action: 'remove', bar: 9 });
+    assert.deepEqual([back.now.numerator, back.now.denominator], [was.numerator, was.denominator]);
   }
 });

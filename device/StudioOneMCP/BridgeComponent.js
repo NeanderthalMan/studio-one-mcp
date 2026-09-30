@@ -330,7 +330,11 @@ class BridgeComponent extends PreSonus.ControlSurfaceComponent {
         const el = matches[0].el;
         const before = this.readParam(el, param);
         el.setParamValue(param, args.value);
-        return { channel: args.channel, field: args.field, before: before, after: this.readParam(el, param) };
+        const out = { channel: args.channel, field: args.field, before: before, after: this.readParam(el, param) };
+        // Volume and pan also as Studio One shows them ("-6.0 dB", "L25"): the
+        // normalised fader curve is not documented, so dB are found by reading this.
+        if (args.field === "volume" || args.field === "pan") out.text = this.displayOf(el, param);
+        return out;
     }
 }
 

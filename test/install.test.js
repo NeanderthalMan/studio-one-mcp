@@ -60,7 +60,7 @@ test('installs the edit-task extension: metadata plus a ZIP package with the mai
   const ext = join(profile, 'Extensions', 'studio-one-mcp.edittasks');
   for (const f of ['metainfo.xml', 'installdata.xml', 'scripts/studio-one-mcp.package']) assert.ok(existsSync(join(ext, f)), f);
   const files = unzipSync(readFileSync(join(ext, 'scripts', 'studio-one-mcp.package')));
-  assert.deepEqual(Object.keys(files).sort(), ['McpEdit.js', 'McpEditConfig.js', 'McpTrackEdit.js', 'classfactory.xml', 'metainfo.xml']);
+  assert.deepEqual(Object.keys(files).sort(), ['McpEdit.js', 'McpEditConfig.js', 'McpTrackEdit.js', 'McpTrackOps.js', 'classfactory.xml', 'metainfo.xml']);
   const cfg = strFromU8(files['McpEditConfig.js']);
   assert.equal(JSON.parse(cfg.slice(cfg.indexOf('{'), cfg.lastIndexOf('}') + 1)).mailbox, `file://${home}/mailbox/`);
 });

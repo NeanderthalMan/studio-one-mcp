@@ -374,16 +374,17 @@ class Bridge {
     // the plug-in). Added this way it is not on the undo stack, and scripts have no
     // way to remove a plug-in, so removing one is by hand.
 
-    pluginMenu() {
+    // category: "AudioEffect" (default) or "AudioSynth" (instruments).
+    pluginMenu(category) {
         if (!Host.Classes || !has(Host.Classes, "createInstance", "function")) return null;
         const menu = Host.Classes.createInstance("Host:PlugInMenuParam");
         if (!menu || !has(menu, "setCategory", "function") || !has(menu, "setValue", "function") || !has(menu, "getSelectedClass", "function")) return null;
-        menu.setCategory("AudioEffect");
+        menu.setCategory(category || "AudioEffect");
         return menu;
     }
 
     plugins(args) {
-        const menu = this.pluginMenu();
+        const menu = this.pluginMenu(args.kind === "instrument" ? "AudioSynth" : "AudioEffect");
         if (!menu) return fail("the plug-in list is not available");
         const names = [];
         for (let i = menu.min; i <= menu.max; i++) {

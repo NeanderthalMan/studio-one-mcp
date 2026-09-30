@@ -48,16 +48,21 @@ export async function addBus(call, { tracks, kind = 'bus' }) {
 }
 
 // One operation through the MCP Track Edit task; its error, if any, becomes ours.
-async function trackTask(call, op) {
+export async function trackTask(call, op) {
   const { results } = await call('trackTask', { ops: [op] });
   const r = results[0] || {};
   if (r.error) throw new Error(r.error);
   return r;
 }
 
-export async function trackEdit(call, { track, action, name, color, to, folder, create, numbered }) {
+export async function trackEdit(call, { track, action, name, color, to, folder, create, numbered, before, after }) {
   const t = await findTrack(call, track);
   switch (action) {
+    case 'move': {
+      if ((before === undefined) === (after === undefined)) throw new Error('move needs exactly one of before or after (a track name)');
+      const r = await trackTask(call, { op: 'moveTrack', track, before, after });
+      return { track, ...(before ? { before } : { after }), order: r.order, note: 'One live_undo puts it back.' };
+    }
     case 'route': {
       if (!to) throw new Error('route needs to (a bus or output channel name)');
       if (!t.channel) throw new Error(`${track} has no mixer channel to route`);
@@ -101,4 +106,31 @@ export async function trackEdit(call, { track, action, name, color, to, folder, 
     default:
       throw new Error(`unknown action ${action}`);
   }
+}
+
+// An instrument track with a new instance of an instrument (live_plugins with
+// kind instrument lists them). One undo step removes both (checked on 5.5.2).
+export async function addInstrumentTrack(call, { instrument, name }) {
+  const r = await trackTask(call, { op: 'addInstrumentTrack', instrument, name });
+  return { track: r.track, instrument: r.instrument, channel: r.channel, connected: r.connected, note: 'One live_undo removes the track and the instrument.' };
+}
+
+// A plug-in on a channel's inserts, through DeviceEditFunctions like Studio One's
+// own Insert FX task: unlike the insert folder's own insertDeviceClass, this is
+// on the undo stack.
+export async function addPlugin(call, { channel, plugin }) {
+  const r = await trackTask(call, { op: 'addPlugin', channel, plugin });
+  const [rack] = await call('inserts', { channel });
+  return { channel, added: r.added, inserts: rack ? rack.inserts : null, note: 'One live_undo removes it.' };
+}
+
+// An effect on a channel's sends: Studio One makes an FX channel with the plug-in
+// and a send to it. Sending to an existing bus or FX channel is not reachable
+// from scripts on 5.5.2, and this did not come off with one undo.
+export async function addFxSend(call, { channel, plugin }) {
+  const before = new Set((await call('channels')).map((c) => c.label));
+  const r = await trackTask(call, { op: 'addFxSend', channel, plugin });
+  const fx = (await call('channels')).filter((c) => !before.has(c.label)).map((c) => c.label);
+  const [s] = await call('sends', { channel });
+  return { channel, plugin: r.added, fxChannel: fx[0] ?? null, sends: s ? s.sends : [], note: 'Not reliably undone by live_undo: remove the send and FX channel in Studio One, or mute the send with live_set_send.' };
 }
