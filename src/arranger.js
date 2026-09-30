@@ -17,6 +17,7 @@
 
 import { trackTask } from './tracks.js';
 import { toSeconds } from './time.js';
+import { edit } from './events.js';
 
 export const SYNC_MODES = { off: 'Set Sync Mode Off', '1bar': 'Set Sync Mode 1 Bar', '2bars': 'Set Sync Mode 2 Bars', '4bars': 'Set Sync Mode 4 Bars', end: 'Set Sync Mode End' };
 
@@ -70,7 +71,75 @@ async function editSection(call, action, { section, name, start, end }) {
   return { ...(r.removed ? { removed: r.removed } : { before: r.before, after: r.after }), sections: (await trackTask(call, { op: 'sections' })).sections, note: 'One live_undo reverts it.' };
 }
 
-export async function arranger(call, savedSections, { action, section, sync, name, start, end }) {
+// A section together with everything under it, on every track. Seen on 5.5.2:
+//  - with the section selected, Edit/Copy takes it and its content; Edit/Paste
+//    inserts that at the playhead (what comes after moves later by its length),
+//    placed from the focus track down, so the top track is focused first;
+//  - Edit/Delete Time in Loop removes the loop range from every track, section and
+//    marker and closes the gap (Edit/Delete and Cut on a section take only it).
+// Each is one undo step; a move is two (the copy, then the original's removal).
+async function withRestore(call, fn) {
+  const song = await call('song');
+  if (song.transport.playing || song.transport.recording) throw new Error('stop playback first');
+  const t0 = song.transport;
+  try {
+    return await fn(song);
+  } finally {
+    await call('command', { category: 'Edit', name: 'Deselect All' }).catch(() => {});
+    await call('setLoop', { start: t0.loopRange.start.seconds, end: t0.loopRange.end.seconds, enable: t0.loop }).catch(() => {});
+    await call('setTransport', { positionSeconds: t0.position.seconds }).catch(() => {});
+    for (const [i, n] of song.selectedTracks.entries()) await call('selectTrack', { name: n, exclusive: i === 0 }).catch(() => {});
+  }
+}
+
+const liveSections = async (call) => (await trackTask(call, { op: 'sections' })).sections;
+
+async function pickSection(call, section) {
+  const list = await liveSections(call);
+  const hit = typeof section === 'number' ? list.find((s) => s.number === section) : list.find((s) => s.name === section) || list.find((s) => s.name.toLowerCase() === String(section).toLowerCase());
+  if (!hit) throw new Error(`no section ${JSON.stringify(section)}`);
+  return hit;
+}
+
+async function pasteSectionAt(call, section, at) {
+  await trackTask(call, { op: 'selectSection', section });
+  if (!(await edit(call, 'Copy')).executed) throw new Error('Edit/Copy did not run');
+  await call('command', { category: 'Edit', name: 'Deselect All' });
+  const [top] = await call('tracks', { events: false });
+  if (!top) throw new Error('the song has no tracks');
+  await trackTask(call, { op: 'focusTrack', track: top.name });
+  await call('setTransport', { positionSeconds: at });
+  if (!(await edit(call, 'Paste')).executed) throw new Error('Edit/Paste did not run');
+}
+
+async function deleteRange(call, start, end) {
+  await call('setLoop', { start, end });
+  if (!(await call('command', { category: 'Edit', name: 'Delete Time in Loop' })).executed) throw new Error('Edit/Delete Time in Loop did not run');
+}
+
+async function sectionContent(call, action, { section, to }) {
+  if (section === undefined) throw new Error(`${action} needs section (number or name)`);
+  return withRestore(call, async () => {
+    const s = await pickSection(call, section);
+    const len = s.end - s.start;
+    if (action === 'delete') {
+      await deleteRange(call, s.start, s.end);
+      return { deleted: s, sections: await liveSections(call), note: 'Everything in the section went with it and the gap closed. One live_undo brings it back.' };
+    }
+    const at = await toSeconds(call, to);
+    if (typeof at !== 'number') throw new Error(`${action} needs to (seconds or bars), best a section boundary`);
+    if (at > s.start + 1e-6 && at < s.end - 1e-6) throw new Error('to is inside the section itself');
+    await pasteSectionAt(call, s.number, at);
+    if (action === 'copy') return { copied: s, to: at, sections: await liveSections(call), note: 'Inserted: everything from there on moved later by the section length. One live_undo removes it.' };
+    // move: the original moved later too if the copy went in before it.
+    const from = at <= s.start + 1e-6 ? s.start + len : s.start;
+    await deleteRange(call, from, from + len);
+    return { moved: s, to: at > s.start ? at - len : at, sections: await liveSections(call), note: 'Two live_undo steps put it back (the removal, then the copy).' };
+  });
+}
+
+export async function arranger(call, savedSections, { action, section, sync, name, start, end, to, content }) {
+  if (action === 'copy' || action === 'delete' || (action === 'move' && content)) return sectionContent(call, action, { section, to: to ?? start });
   if (['add', 'rename', 'resize', 'move', 'remove'].includes(action)) return editSection(call, action, { section, name, start, end });
   const song = await call('song');
   const { playing } = song.transport;

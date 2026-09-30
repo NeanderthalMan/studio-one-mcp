@@ -22,6 +22,7 @@ import { liveEvents } from './events.js';
 import { timeSignature } from './signatures.js';
 import { writeAutomation } from './automation.js';
 import { toSeconds } from './time.js';
+import { liveChanges } from './changes.js';
 import { recordSetup } from './record.js';
 import { snapshot } from './snapshots.js';
 import { mixSnapshot } from './mixsnap.js';
@@ -685,14 +686,16 @@ async function savedSections() {
 
 server.tool(
   'live_arranger',
-  "Arranger sections in the running Studio One. sections: list them (numbered in song order). goto: a section by number or name; while playing it jumps at the arranger's sync point, while stopped it moves the playhead to the section's start. next / previous: step while playing. syncMode: when jumps happen (off = immediately, 1bar, 2bars, 4bars, end of section); changing it is an undo step. createFromMarkers: make sections between markers. Editing (each one live_undo): add {start, end, name}, rename {section, name}, resize {section, end}, move {section, start}, remove {section}; moving or resizing a section does not move the events under it. Positions are seconds or bars like \"9.1.1.0\". The loop range is kept.",
+  "Arranger sections in the running Studio One. sections: list them (numbered in song order). goto: a section by number or name; while playing it jumps at the arranger's sync point, while stopped it moves the playhead to the section's start. next / previous: step while playing. syncMode: when jumps happen (off = immediately, 1bar, 2bars, 4bars, end of section); changing it is an undo step. createFromMarkers: make sections between markers. Editing (each one live_undo): add {start, end, name}, rename {section, name}, resize {section, end}, move {section, start}, remove {section}; these change only the section, not the events under it. With its content, on every track: copy {section, to} inserts a copy at a position (what follows moves later); delete {section} removes it and everything in it, closing the gap; move {section, to, content: true} does both (two undo steps). Positions are seconds or bars like \"9.1.1.0\". The loop range is kept.",
   {
-    action: z.enum(['sections', 'goto', 'next', 'previous', 'syncMode', 'createFromMarkers', 'add', 'rename', 'resize', 'move', 'remove']),
+    action: z.enum(['sections', 'goto', 'next', 'previous', 'syncMode', 'createFromMarkers', 'add', 'rename', 'resize', 'move', 'remove', 'copy', 'delete']),
     section: z.union([z.number().int(), z.string()]).optional().describe('Section number or name (goto jumps while playing only to 1-16)'),
     sync: z.enum(['off', '1bar', '2bars', '4bars', 'end']).optional().describe('For syncMode'),
     name: z.string().optional().describe('For add and rename'),
     start: TIME.optional().describe('For add and move'),
     end: TIME.optional().describe('For add and resize'),
+    to: TIME.optional().describe('For copy, and move with content: where it goes (best a section boundary)'),
+    content: z.boolean().optional().describe('For move: take the events under the section along'),
   },
   guard(async (a) => arranger(call, await savedSections(), a)),
 );
@@ -752,6 +755,13 @@ server.tool(
     points: z.array(z.object({ at: TIME, db: z.number().optional(), pan: z.number().optional(), value: z.number().optional() })),
   },
   guard(({ channel, parameter, points }) => writeAutomation(call, { channel, parameter, points })),
+);
+
+server.tool(
+  'live_changes',
+  "What changed in the song open in Studio One since the previous call: tracks added, removed, renamed or reordered, events added, removed or moved on each track, mixer changes (volume, pan, mute, solo, arm, monitor, automation mode, output, plug-ins), tempo, loop, and markers and arranger sections added, removed, renamed or moved. The first call for a song only takes a look. Changes are net (moved and moved back is no change) and do not say who made them. reset: start over from now.",
+  { reset: z.boolean().optional().describe('Forget the previous look and take a new one') },
+  guard((a) => liveChanges(call, a)),
 );
 
 server.tool(

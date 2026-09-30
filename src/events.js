@@ -13,6 +13,17 @@
 import { trackTask } from './tracks.js';
 import { toSeconds } from './time.js';
 
+// Edit commands go to the arrangement editor, not to whatever view has focus.
+// An older bridge without editorCommand gets the plain command.
+export async function edit(call, name) {
+  try {
+    return await call('editorCommand', { category: 'Edit', name });
+  } catch (e) {
+    if (!/unknown op/.test(String(e.message))) throw e;
+    return call('command', { category: 'Edit', name });
+  }
+}
+
 async function restoreSelection(call, names) {
   for (const [i, name] of names.entries()) await call('selectTrack', { name, exclusive: i === 0 }).catch(() => {});
 }
@@ -45,15 +56,15 @@ export async function liveEvents(call, a) {
         await trackTask(call, { op: 'selectEvent', track, event });
         if (action === 'duplicate') {
           for (let i = 0; i < times; i++) {
-            const r = await call('command', { category: 'Edit', name: 'Duplicate' });
+            const r = await edit(call, 'Duplicate');
             if (!r.executed) throw new Error('Edit/Duplicate did not run');
           }
         } else {
-          if (!(await call('command', { category: 'Edit', name: 'Copy' })).executed) throw new Error('Edit/Copy did not run');
+          if (!(await edit(call, 'Copy')).executed) throw new Error('Edit/Copy did not run');
           await call('command', { category: 'Edit', name: 'Deselect All' });
           await trackTask(call, { op: 'focusTrack', track: target });
           await call('setTransport', { positionSeconds: at });
-          if (!(await call('command', { category: 'Edit', name: 'Paste' })).executed) throw new Error('Edit/Paste did not run');
+          if (!(await edit(call, 'Paste')).executed) throw new Error('Edit/Paste did not run');
         }
       } finally {
         await call('command', { category: 'Edit', name: 'Deselect All' }).catch(() => {});

@@ -135,6 +135,7 @@ class Bridge {
             case "channels": return this.fromComponent(c => c.channels());
             case "setChannel": return this.fromComponent(c => c.setChannel(args));
             case "command": return this.command(args);
+            case "editorCommand": return this.editorCommand(args);
             case "listCommands": return this.listCommands(args);
             case "song": return this.song();
             case "tracks": return this.tracks(args);
@@ -180,6 +181,17 @@ class Bridge {
         const r = fn(this.component);
         if (r && !Array.isArray(r) && typeof r.error === "string") return fail(r.error);
         return r;
+    }
+
+    // An edit command sent to the song's arrangement editor itself. Edit/Copy and
+    // Edit/Paste through Host.GUI.Commands go to whichever view has the keyboard
+    // focus: after a song was reopened, Paste "ran" and pasted nothing (5.5.2).
+    // The editor object takes them whatever is focused.
+    editorCommand(args) {
+        if (!args.category || !args.name) return fail("category and name are required");
+        const ed = docObject("Editor");
+        if (!ed || !has(ed, "interpretCommand", "function")) return this.command(args);
+        return { executed: !!ed.interpretCommand(String(args.category), String(args.name)), via: "editor" };
     }
 
     // checkOnly asks whether the command is currently enabled without running it

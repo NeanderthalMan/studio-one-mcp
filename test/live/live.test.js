@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { snapshot } from '../../src/snapshots.js';
 import { mixSnapshot } from '../../src/mixsnap.js';
 import { recordSetup } from '../../src/record.js';
+import { liveChanges } from '../../src/changes.js';
 
 let channels;
 let testChannel;
@@ -878,3 +879,39 @@ test('time signature: insert 7/8 at bar 9 (numbers: no dialog), then remove it',
     assert.deepEqual([back.now.numerator, back.now.denominator], [was.numerator, was.denominator]);
   }
 });
+
+test('arranger with content: copy the first section in after itself, undo removes it', async (t) => {
+  const sections = async () => (await trackTask(call, { op: 'sections' })).sections.map((s) => `${s.name}@${s.start}-${s.end}`).join();
+  const [first] = (await trackTask(call, { op: 'sections' })).sections;
+  if (!first) return t.skip('the song has no arranger sections');
+  const s0 = await sections();
+  const t0 = (await call('song')).transport;
+  const base = await counts();
+  const r = await arranger(call, () => [], { action: 'copy', section: first.number, to: first.end });
+  try {
+    assert.ok(r.sections.length > s0.split(',').length, 'one more section');
+    assert.ok(r.sections.some((s) => Math.abs(s.start - first.end) < 0.01 && s.name === first.name), 'a copy starts where the section ended');
+    assert.equal((await call('song')).transport.position.seconds, t0.position.seconds, 'playhead put back');
+  } finally {
+    await undoUntil(async () => (await sections()) === s0, 'the section copy', base);
+    await call('setLoop', { start: t0.loopRange.start.seconds, end: t0.loopRange.end.seconds, enable: t0.loop });
+  }
+});
+
+test('live_changes: a volume change shows up in the next look, then nothing', async () => {
+  await liveChanges(call, { reset: true });
+  const v0 = testChannel.volume;
+  try {
+    await call('setChannel', { channel: testChannel.label, field: 'volume', value: v0 > 0.5 ? 0.25 : 0.75 });
+    const r = await liveChanges(call, {});
+    const hit = (r.mixer || []).find((m) => m.channel === testChannel.label);
+    assert.ok(hit && hit.volume, JSON.stringify(r));
+    assert.equal(hit.volume.from, Math.round(v0 * 1000) / 1000);
+  } finally {
+    await call('setChannel', { channel: testChannel.label, field: 'volume', value: v0 });
+  }
+  const back = await liveChanges(call, {});
+  assert.ok((back.mixer || []).some((m) => m.channel === testChannel.label), 'the change back is seen too');
+  assert.equal((await liveChanges(call, {})).changed, false, 'and then nothing');
+});
+

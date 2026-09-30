@@ -381,6 +381,22 @@ mtoOps.editSection = function (context, op) {
 	return { before: before, after: mtoSectionInfo(ev, pick.number) };
 };
 
+// { section }: select just that section. Edit/Copy then takes the section with
+// everything under it on every track, and Edit/Paste inserts it at the playhead
+// (checked on 5.5.2); Edit/Delete and Cut take only the section itself.
+mtoOps.selectSection = function (context, op) {
+	var f = context.functions, e = context.editor;
+	var a = mtoArranger(context);
+	if (a.error) return a;
+	var pick = mtoPickEvent(mtoEvents(a.track), op.section, "section");
+	if (pick.error) return pick;
+	var sf = mtoFn(e, "createSelectFunctions") ? e.createSelectFunctions(f) : null;
+	if (!mtoFn(sf, "select")) return { error: "selecting sections is not available" };
+	sf.selectExclusive = true;
+	sf.select(pick.event);
+	return { selected: mtoSectionInfo(pick.event, pick.number) };
+};
+
 // ---- markers and time signatures ----------------------------------------------------
 
 function mtoMarkerInfo(ev, number) {

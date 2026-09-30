@@ -49,7 +49,7 @@ An independent project, not affiliated with or endorsed by PreSonus or Fender. S
 | `live_record_setup` | Read and set the metronome (click, precount and its length in bars, preroll), and set record modes (replace, loop takes or mix, takes to layers, input quantize, note erase). Studio One does not expose record modes for reading, so those are reported as set, not confirmed. Auto Punch: off, in, out or both, with a punch range (Studio One punches between the loop locators; looping is not switched on). |
 | `live_set_automation` | Set a channel's automation mode: off, read, touch, latch or write. `live_channels` shows each channel's mode. |
 | `live_write_automation` | Write volume (in dB) or pan automation along points, straight lines between them. Scripts cannot add envelope points, so it plays the range once in Write mode with the fader following the curve, then leaves the channel in Read. Audible, and only with `confirm: true`. |
-| `live_arranger` | Arranger sections: list them (live), go to one by number or name (a jump at the sync point while playing, a playhead move while stopped), step next or previous while playing, set the sync mode, create sections from markers, and **add, rename, resize, move or remove** a section (each one undo; the events under a section are not moved). The loop range is kept. |
+| `live_arranger` | Arranger sections: list them (live), go to one by number or name (a jump at the sync point while playing, a playhead move while stopped), step next or previous while playing, set the sync mode, create sections from markers, and **add, rename, resize, move or remove** a section (each one undo; the events under a section are not moved). With its content on every track: **copy** a section in at a position (what follows moves later), **delete** it and close the gap, or **move** it (`content: true`). The loop range is kept. |
 | `live_macros` / `live_run_macro` | The macros (built-in and your own) by title, and run one by title, or only check whether it is enabled. |
 | `live_time_signature` | The time signature at any positions; insert one at a bar, or remove one. Each is one undo. |
 | `live_tempo` | The tempo at any positions, set the tempo of the segment containing a position, or insert a tempo change. Studio One must be stopped; the playhead is put back. Removing an inserted change takes undo, so check with `at` afterwards. |
@@ -63,6 +63,7 @@ An independent project, not affiliated with or endorsed by PreSonus or Fender. S
 | `live_add_bus` | Create a bus for some tracks (their outputs are routed into it) or a VCA that controls them. One undo removes it and puts the routing back. |
 | `live_command` | Run any of the roughly 1,000 Studio One commands, e.g. `Transport/Start`, `Edit/Undo`, `File/Save` or `View/Console`. `check_only` reports whether one is enabled without running it. |
 | `live_list_commands` | Discover command names, optionally with whether each is enabled right now. |
+| `live_changes` | What changed in the song since the previous call: tracks added, removed, renamed or reordered, events on each track, mixer changes (levels, mute and solo, arm, monitor, automation mode, output, plug-ins), tempo, loop, markers and sections. It compares snapshots, so it sees what you did by hand as well, as net changes. |
 | `live_eval` | Run JavaScript inside Studio One to explore its object model. Opt-in only. |
 
 ## Install
@@ -198,8 +199,13 @@ What these found out about Studio One 5.5.2, in short:
 - Commands that open a dialog take its values as arguments (`findCommand(...).arguments` lists them, e.g. `Bar, Numerator, Denominator` for Insert Time Signature). Given as **numbers** they run without the dialog; given as strings the dialog opens and blocks the bridge until someone closes it.
 - Edit/Paste goes to the editor's focus track, not the selected one; the task focuses the target first.
 - There is no scripted way to add automation envelope points, so `live_write_automation` records them the way a person would, in Write mode.
+- With an arranger section selected, Edit/Copy takes the section *and* everything under it, and Edit/Paste inserts that at the playhead; Edit/Delete and Cut take only the section. Edit/Delete Time in Loop removes a range from every track, section and marker.
 
-One thing to know about folders: a track inside a **collapsed** folder is missing from the track list that scripts see, so the track tools cannot find it by name. The folder action expands the folder before moving a track in, as Studio One's own folder script does; if you collapse it later, expand it again before addressing those tracks.
+### Watching for changes
+
+`live_changes` takes a snapshot of the song on every call (tracks and their events, the mixer, plug-ins, tempo, loop, markers and sections), keeps it in the studio-one-mcp data folder per song, and reports the difference from the previous one. The first call for a song only takes a look. Changes are net (a fader moved and moved back is no change) and do not say who made them.
+
+Studio One 5.5.2 can also notify scripts of changes (`Host.Signals.advise`), and a live feed built on that was tried and dropped: it crashed Studio One three times. Reading a parameter's text while a song was closing crashed it at once; unsubscribing from an object that was already gone crashed it about a minute later; and unsubscribing while Studio One quit crashed it at quit. A close does send the DocumentManager's `activeDocumentChanged` before tearing the song down, but there is no such notice before quitting, so there is no safe moment to let go. Comparing snapshots touches none of that.
 
 ### Undo
 
