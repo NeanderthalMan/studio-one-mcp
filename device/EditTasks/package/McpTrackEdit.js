@@ -115,13 +115,25 @@ function mteApply(context, ops) {
 			else if (!dst.input) r.error = op.to + " has no input to route to";
 			else { devf.connectChannel(src, dst.input); r.done = true; }
 		} else if (op.op === "folder") {
-			// { tracks: [names], folder: name }: move tracks into an existing folder track.
+			// { tracks: [names], folder: name, create }: move tracks into a folder track
+			// (made first when create is set). The folder is expanded before the move,
+			// as Studio One's own folder script does: tracks inside a collapsed folder
+			// drop out of the track list that scripts see.
 			var ts = mteTracks(context);
 			var folder = null;
 			for (var b = 0; b < ts.length; b++) if (ts[b].name === op.folder && ts[b].isFolder) folder = ts[b];
+			if (!folder && op.create && mteFn(fns, "addTrack")) {
+				fns.executeImmediately = true;
+				var tl = context.mainTrackList;
+				var at = tl && mteFn(tl, "getInsertPosition") ? tl.getInsertPosition() : 0;
+				folder = fns.addTrack("FolderTrack", at, op.folder);
+				r.created = !!folder;
+			}
+			var folders = context.editor && context.editor.model ? context.editor.model.folders : null;
 			if (!folder) r.error = "no folder track named " + op.folder;
 			else if (!mteFn(fns, "moveToFolder")) r.error = "moveToFolder is not available";
 			else {
+				if (folders && mteFn(folders, "isExpanded") && mteFn(folders, "toggleExpand") && !folders.isExpanded(folder)) folders.toggleExpand(folder);
 				r.moved = [];
 				r.missing = [];
 				var names = op.tracks && op.tracks.length ? op.tracks : [];
@@ -129,6 +141,28 @@ function mteApply(context, ops) {
 					var hit = null;
 					for (var e = 0; e < ts.length; e++) if (ts[e].name === names[d] && ts[e] !== folder) hit = ts[e];
 					if (hit) { fns.moveToFolder(folder, hit); r.moved.push(names[d]); } else r.missing.push(names[d]);
+				}
+			}
+		} else if (op.op === "renameEvents") {
+			// { track, name, numbered }: rename every event on a track, like Studio
+			// One's Rename Events ("name(01)", "name(02)"… in time order when numbered).
+			var tt = mteTracks(context);
+			var tr = null, nTr = 0;
+			for (var g = 0; g < tt.length; g++) if (tt[g].name === op.track) { tr = tt[g]; nTr++; }
+			if (nTr !== 1) r.error = nTr ? "track name is ambiguous: " + op.track : "no track named " + op.track;
+			else if (typeof op.name !== "string" || !op.name) r.error = "renameEvents needs name";
+			else if (!mteFn(fns, "renameEvent") || !mteFn(tr, "createIterator")) r.error = "renameEvent is not available";
+			else {
+				var evs = [];
+				var it = tr.createIterator();
+				var ev;
+				while (it && (ev = it.next())) evs.push(ev);
+				evs.sort(function (x, y) { return (x.startTime ? x.startTime.seconds : 0) - (y.startTime ? y.startTime.seconds : 0); });
+				r.renamed = [];
+				for (var h = 0; h < evs.length; h++) {
+					var nm = op.numbered ? op.name + "(" + (h < 9 ? "0" : "") + (h + 1) + ")" : op.name;
+					fns.renameEvent(evs[h], nm);
+					r.renamed.push(nm);
 				}
 			}
 		} else {

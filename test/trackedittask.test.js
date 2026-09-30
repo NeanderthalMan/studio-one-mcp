@@ -72,6 +72,24 @@ test('folder moves named tracks into a folder track; probe describes what it fin
   assert.deepEqual([probe.channelCount, probe.firstChannels, probe.deviceFunctions, probe.trackCount], [4, ['Vox', 'Gtr', 'Bus 1', 'Main'], { connectChannel: 'function' }, 3]);
 });
 
+test('renameEvents names every event in time order (numbered on request); folder create makes and expands it', () => {
+  const t = load();
+  const s = studio();
+  const evs = [{ name: 'b', startTime: { seconds: 4 } }, { name: 'a', startTime: { seconds: 0 } }];
+  s.context.mainTrackList = { numTracks: 1, getTrack: () => ({ name: 'Vox', createIterator: () => { let k = 0; return { next: () => evs[k++] || null }; } }) };
+  s.context.functions.renameEvent = (e, n) => (e.name = n);
+  let added = null;
+  const expanded = [];
+  s.context.functions.addTrack = (type, at, name) => (added = { type, name, isFolder: 1, children: [] });
+  s.context.editor = { model: { folders: { isExpanded: () => false, toggleExpand: (f) => expanded.push(f.name) } } };
+  t.request([{ op: 'renameEvents', track: 'Vox', name: 'Lead', numbered: true }, { op: 'folder', folder: 'Band', tracks: ['Vox'], create: true }]);
+  t.task.performEdit(s.context);
+  const [ren, fold] = t.result().results;
+  assert.deepEqual(ren.renamed, ['Lead(01)', 'Lead(02)']);
+  assert.deepEqual(evs.map((e) => e.name), ['Lead(02)', 'Lead(01)'], 'the event at 0 s is (01)');
+  assert.deepEqual([fold.created, added.type, added.name, expanded, added.children], [true, 'FolderTrack', 'Band', ['Band'], ['Vox']]);
+});
+
 test('missing host members are reported, not called', () => {
   const t = load();
   t.request([{ op: 'route', channel: 'A', to: 'B' }, { op: 'folder', folder: 'F', tracks: [] }, { op: 'probe' }]);

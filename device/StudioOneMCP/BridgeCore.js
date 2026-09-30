@@ -141,6 +141,7 @@ class Bridge {
             case "selectTrack": return this.selectTrack(args);
             case "notes": return this.notes(args);
             case "editNotes": return this.editNotes(args);
+            case "trackTask": return this.trackTask(args);
             case "metronome": return this.metronome(args);
             case "transport": return this.transport(args);
             case "setTransport": return this.setTransport(args);
@@ -228,7 +229,28 @@ class Bridge {
             position: time("primaryTime"),
             timeFormat: param("primaryTimeFormat") ? String(param("primaryTimeFormat").string) : null,
             loopRange: { start: time("loopStart"), end: time("loopEnd") },
+            // Auto Punch records between the loop locators. "punchIn" is punch-in;
+            // "punch" is on whenever any autopunch is (5.5.2), so punch-out alone
+            // cannot be told apart once punch-in is on.
+            autopunch: param("punchIn") ? { punchIn: !!val("punchIn"), any: !!val("punch") } : null,
         };
+    }
+
+    // Track edits through the "MCP Track Edit" task (device/EditTasks): routing,
+    // folders, event names. Request in track-edit-request.json, result in
+    // track-edit-result.json; the task needs no selection.
+    trackTask(args) {
+        if (!Array.isArray(args.ops) || !args.ops.length) return fail("ops: one or more track edit operations");
+        if (!Host.GUI.Commands.findCommand("Track", "MCP Track Edit")) return fail("the MCP Track Edit task is not installed: reinstall the device, then restart Studio One");
+        const id = newSession();
+        this.mailbox.write("track-edit-result.json", { id: null });
+        this.mailbox.write("track-edit-request.json", { id: id, ops: args.ops });
+        const r = this.run("Track", "MCP Track Edit");
+        if (isFail(r)) return r;
+        const res = this.mailbox.read("track-edit-result.json");
+        if (!res || res.id !== id) return fail("the track edit task did not report back");
+        if (res.error) return fail(res.error);
+        return { results: res.results };
     }
 
     song() {

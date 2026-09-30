@@ -47,9 +47,37 @@ export async function addBus(call, { tracks, kind = 'bus' }) {
   return { kind, added, ...(kind === 'bus' ? { routed } : {}), note: 'One live_undo removes it (and puts the routing back).' };
 }
 
-export async function trackEdit(call, { track, action, name, color }) {
+// One operation through the MCP Track Edit task; its error, if any, becomes ours.
+async function trackTask(call, op) {
+  const { results } = await call('trackTask', { ops: [op] });
+  const r = results[0] || {};
+  if (r.error) throw new Error(r.error);
+  return r;
+}
+
+export async function trackEdit(call, { track, action, name, color, to, folder, create, numbered }) {
   const t = await findTrack(call, track);
   switch (action) {
+    case 'route': {
+      if (!to) throw new Error('route needs to (a bus or output channel name)');
+      if (!t.channel) throw new Error(`${track} has no mixer channel to route`);
+      const before = (await call('channels')).find((c) => c.label === t.channel)?.output ?? null;
+      await trackTask(call, { op: 'route', channel: t.channel, to });
+      const after = (await call('channels')).find((c) => c.label === t.channel)?.output ?? null;
+      return { track, channel: t.channel, before, after, note: 'Route back to the "before" channel to undo.' };
+    }
+    case 'folder': {
+      if (!folder) throw new Error('folder needs folder (a folder track name)');
+      const r = await trackTask(call, { op: 'folder', folder, tracks: [track], create: !!create });
+      if (r.missing?.length) throw new Error(`${track} could not be moved`);
+      return { track, folder, created: !!r.created, note: 'live_undo reverts it (and the folder, if it was created: one more undo).' };
+    }
+    case 'renameEvents': {
+      if (!name) throw new Error('renameEvents needs name');
+      const before = (await call('tracks', { name: track })).find((x) => x.name === track)?.events.map((e) => e.name) ?? [];
+      const r = await trackTask(call, { op: 'renameEvents', track, name, numbered: !!numbered });
+      return { track, before, after: r.renamed, note: 'live_undo reverts it.' };
+    }
     case 'rename': {
       if (!name) throw new Error('rename needs name');
       if (!t.channel) throw new Error(`${track} has no mixer channel to rename through`);

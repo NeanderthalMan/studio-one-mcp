@@ -562,8 +562,11 @@ server.tool(
 
 server.tool(
   'live_record_setup',
-  'Recording setup in the running Studio One. With no arguments, reads the metronome: click, precount, precount length in bars, preroll. Set any of those, and/or record modes: replace, loopTakes or loopMix, takesToLayers, inputQuantize, noteErase (true/false). Record modes cannot be read back from Studio One, so they are reported as set, not confirmed.',
+  'Recording setup in the running Studio One. With no arguments, reads the metronome: click, precount, precount length in bars, preroll. Set any of those, and/or record modes: replace, loopTakes or loopMix, takesToLayers, inputQuantize, noteErase (true/false). Record modes cannot be read back from Studio One, so they are reported as set, not confirmed. Auto Punch: punch off, in, out or both, and punchFrom/punchTo for the range (seconds or bars; Studio One punches between the loop locators, so this sets the loop range without turning looping on). The result shows punch-in and whether any autopunch is on (punch-out alone cannot be read separately once punch-in is on).',
   {
+    punch: z.enum(['off', 'in', 'out', 'both']).optional(),
+    punchFrom: TIME.optional(),
+    punchTo: TIME.optional(),
     click: z.boolean().optional(),
     precount: z.boolean().optional(),
     precountBars: z.number().int().optional().describe('1-16'),
@@ -587,12 +590,16 @@ server.tool(
 
 server.tool(
   'live_track_edit',
-  'Edit a track by exact name in the running Studio One: rename (and its mixer channel), color ("#rrggbb"), or remove. Rename and colour are not on the undo stack (the result has the "before" value); remove undoes with live_undo. The track selection is kept.',
+  'Edit a track by exact name in the running Studio One: rename (and its mixer channel), color ("#rrggbb"), remove, route (send its channel\'s output to a bus or output, by channel name), folder (move it into a folder track, creating it with create: true; the folder is expanded so the track stays visible to these tools), or renameEvents (name every event on it, numbered in time order if asked). Rename and colour are not on the undo stack; route is set back by routing to the "before" channel the result gives; remove, folder and renameEvents undo with live_undo. The track selection is kept. Route, folder and renameEvents run through the MCP Track Edit task installed with the device.',
   {
     track: z.string(),
-    action: z.enum(['rename', 'color', 'remove']),
-    name: z.string().optional().describe('For rename'),
+    action: z.enum(['rename', 'color', 'remove', 'route', 'folder', 'renameEvents']),
+    name: z.string().optional().describe('For rename and renameEvents'),
     color: z.string().optional().describe('For color: "#rrggbb"'),
+    to: z.string().optional().describe('For route: destination channel name, e.g. "Bus 1" or "Main"'),
+    folder: z.string().optional().describe('For folder: folder track name'),
+    create: z.boolean().optional().describe('For folder: create the folder track if there is none by that name'),
+    numbered: z.boolean().optional().describe('For renameEvents: add (01), (02)… in time order'),
   },
   guard((a) => trackEdit(call, a)),
 );

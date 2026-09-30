@@ -16,7 +16,27 @@ export const RECORD_MODES = {
   noteErase: 'Note Erase',
 };
 
+// Auto Punch: Transport/Autopunch In|Out|Autopunch, set with a State argument
+// (checked on 5.5.2), recording between the loop locators (Studio One manual,
+// "Auto Punch"). The range is set without turning looping on.
+const PUNCH = { off: [['Autopunch', 0]], in: [['Autopunch', 0], ['Autopunch In', 1]], out: [['Autopunch', 0], ['Autopunch Out', 1]], both: [['Autopunch', 1]] };
+
+async function setPunch(call, { punch, punchFrom, punchTo }) {
+  if (punch !== undefined && !PUNCH[punch]) throw new Error(`punch must be one of ${Object.keys(PUNCH).join(', ')}`);
+  if ((punchFrom === undefined) !== (punchTo === undefined)) throw new Error('give both punchFrom and punchTo (the punch range is the loop range)');
+  if (punchFrom !== undefined) await call('setLoop', { start: punchFrom, end: punchTo });
+  for (const [name, state] of PUNCH[punch] || []) {
+    const r = await call('command', { category: 'Transport', name, args: ['State', state] });
+    if (!r.executed) throw new Error(`Transport/${name} did not run`);
+  }
+  const t = (await call('song')).transport;
+  return { autopunch: t.autopunch, range: t.loopRange };
+}
+
 export async function recordSetup(call, args = {}) {
+  // Validate the punch arguments before changing anything.
+  if (args.punch !== undefined && !PUNCH[args.punch]) throw new Error(`punch must be one of ${Object.keys(PUNCH).join(', ')}`);
+  if ((args.punchFrom === undefined) !== (args.punchTo === undefined)) throw new Error('give both punchFrom and punchTo (the punch range is the loop range)');
   const metro = {};
   for (const k of ['click', 'precount', 'preroll', 'precountBars']) if (args[k] !== undefined) metro[k] = args[k];
   const modes = {};
@@ -29,8 +49,11 @@ export async function recordSetup(call, args = {}) {
     set[k] = on;
   }
   const metronome = await call('metronome', metro);
+  const wantPunch = args.punch !== undefined || args.punchFrom !== undefined || args.punchTo !== undefined;
+  const punch = wantPunch ? await setPunch(call, args) : { autopunch: (await call('song')).transport.autopunch };
   return {
     metronome,
+    punch,
     ...(Object.keys(set).length ? { recordModesSet: set, note: 'Record modes cannot be read back from Studio One; these were set, not confirmed.' } : {}),
   };
 }

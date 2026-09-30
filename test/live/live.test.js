@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { snapshot } from '../../src/snapshots.js';
 import { mixSnapshot } from '../../src/mixsnap.js';
+import { recordSetup } from '../../src/record.js';
 
 let channels;
 let testChannel;
@@ -646,6 +647,65 @@ test('mix snapshot: save, change a channel volume, restore brings it back', asyn
     assert.ok(r.changes.includes(`${testChannel.label} volume`), JSON.stringify(r.changes));
   }
   assert.equal((await call('channels')).find((c) => c.label === testChannel.label).volume, v0);
+});
+
+test('track route: send a track to another bus through the MCP Track Edit task, then back', async (t) => {
+  const chans = await call('channels');
+  const track = await uniqueNamed((x) => x.channel && x.mediaType === 'Audio' && chans.find((c) => c.label === x.channel)?.output);
+  const out0 = chans.find((c) => c.label === track.channel).output;
+  const other = chans.find((c) => /^Bus /.test(c.label) && c.label !== out0 && c.label !== track.channel);
+  if (!other) return t.skip('no second bus to route to');
+  try {
+    const r = await trackEdit(call, { track: track.name, action: 'route', to: other.label });
+    assert.deepEqual([r.before, r.after], [out0, other.label]);
+  } finally {
+    const back = await trackEdit(call, { track: track.name, action: 'route', to: out0 });
+    assert.equal(back.after, out0);
+  }
+});
+
+test('track folder: create a folder, move a track in (it stays visible), undo both', async () => {
+  const track = await uniqueNamed((x) => x.mediaType === 'Audio' && x.eventCount === 0);
+  const base = await counts();
+  const r = await trackEdit(call, { track: track.name, action: 'folder', folder: 'MCP Test Folder', create: true });
+  try {
+    assert.equal(r.created, true);
+    assert.equal((await call('tracks', { name: track.name, events: false })).filter((x) => x.name === track.name).length, 1, 'still visible inside the expanded folder');
+  } finally {
+    await undoUntil(async () => !(await call('tracks', { name: 'MCP Test Folder', events: false })).some((x) => x.name === 'MCP Test Folder'), 'the folder', base);
+    for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  }
+});
+
+test('track renameEvents: rename a track\'s events, undo restores the names', async (t) => {
+  const track = await uniqueNamed((x) => x.eventCount > 0 && x.mediaType === 'Audio');
+  if (!track) return t.skip('no audio track with events');
+  const names = async () => (await call('tracks', { name: track.name })).find((x) => x.name === track.name).events.map((e) => e.name);
+  const before = await names();
+  const base = await counts();
+  const r = await trackEdit(call, { track: track.name, action: 'renameEvents', name: 'MCP Test', numbered: true });
+  try {
+    assert.deepEqual(r.before, before);
+    assert.deepEqual((await names()).slice().sort(), r.after.slice().sort());
+  } finally {
+    await undoUntil(async () => (await names()).join() === before.join(), 'the event names', base);
+    for (const [i, name] of selection0.entries()) await call('selectTrack', { name, exclusive: i === 0 });
+  }
+});
+
+test('punch: set punch-in over a range, read it back, then off with the loop range restored', async () => {
+  const t0 = (await call('song')).transport;
+  if (!t0.autopunch) return;
+  try {
+    const r = await recordSetup(call, { punch: 'in', punchFrom: 2, punchTo: 4 });
+    assert.deepEqual(r.punch.autopunch, { punchIn: true, any: true });
+    assert.deepEqual([r.punch.range.start.seconds, r.punch.range.end.seconds], [2, 4]);
+    assert.equal((await call('song')).transport.loop, t0.loop, 'looping not switched on');
+  } finally {
+    await recordSetup(call, { punch: t0.autopunch.any ? (t0.autopunch.punchIn ? 'both' : 'out') : 'off' });
+    await call('setLoop', { start: t0.loopRange.start.seconds, end: t0.loopRange.end.seconds, enable: t0.loop });
+  }
+  assert.deepEqual((await call('song')).transport.autopunch, t0.autopunch);
 });
 
 // Record modes are not exercised: they cannot be read, so they could not be restored.
