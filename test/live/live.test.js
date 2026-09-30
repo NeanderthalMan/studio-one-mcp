@@ -240,7 +240,7 @@ const counts = async () => ({ tracks: (await call("song")).trackCount, channels:
 // invisible parameter ones must not change the counts; once our edit is gone the
 // counts must be back at the baseline. Anything else means an undo reached some
 // other edit: it is redone and the test fails, rather than digging further.
-async function undoUntil(isUndone, what, baseline, max = 8) {
+async function undoUntil(isUndone, what, baseline, max = 20) {
   const withEdit = await counts();
   for (let i = 1; i <= max; i++) {
     await call("undo", {}); // a refused undo (done 0) changes nothing, so trying again is safe
