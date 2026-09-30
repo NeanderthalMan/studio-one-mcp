@@ -390,7 +390,11 @@ export function readSong(path) {
     mixer,
     automation: readEnvelopes(zip),
     media: [...media.values()].map(({ performance, ...clip }) => clip),
-    notes: zip.text('notes.txt') || '',
+    notes: (zip.text('notes.txt') || '').replace(/^﻿/, ''),
+    // Per-channel notes (notepad.xml: one NotepadItem per channel, by title); empty ones left out.
+    channelNotes: kids(zip.xml('notepad.xml'), 'NotepadItem')
+      .filter((n) => (n.attrs.text || '').trim())
+      .map((n) => ({ channel: n.attrs.title || '', text: n.attrs.text })),
   };
 }
 
@@ -423,5 +427,7 @@ export function summarizeSong(s) {
     buses: s.mixer.filter((c) => !['AudioTrack', 'AudioInput'].includes(c.kind)).map((c) => `${c.kind}: ${c.label}`),
     mediaFiles: s.media.length,
     automation: s.automation.length ? s.automation.map((e) => `${e.channel}/${e.parameter}: ${e.points.length} points`) : undefined,
+    notes: s.notes.trim() ? (s.notes.length > 1000 ? `${s.notes.slice(0, 1000)}… (${s.notes.length} characters; detail=full for all)` : s.notes) : undefined,
+    channelNotes: s.channelNotes.length ? s.channelNotes.map((n) => `${n.channel}: ${n.text.length > 200 ? `${n.text.slice(0, 200)}…` : n.text}`) : undefined,
   };
 }

@@ -18,7 +18,7 @@ An independent project, not affiliated with or endorsed by PreSonus or Fender. S
 | Tool | What it does |
 |---|---|
 | `song_list` | Songs on disk, newest first. This includes songs that exist only as autosaves. |
-| `song_read` | One song, as a `summary` (one line per track) or `full` (every take and clip, instrument notes, each plug-in's saved settings, automation envelopes). Positions are given as bar/beat and as seconds. |
+| `song_read` | One song, as a `summary` (one line per track) or `full` (every take and clip, instrument notes, each plug-in's saved settings, automation envelopes). Both include the song notes and channel notes when there are any. Positions are given as bar/beat and as seconds. |
 | `song_history` | A song's autosaves, for comparing versions. |
 | `song_diff` | What changed between two saves: tempo, meter, markers, sections, tracks (added, removed, renamed, takes, events, notes), mixer (levels, mute/solo, automation mode, output, plug-ins and their settings) and automation. By default it compares the song with its newest autosave, older to newer. |
 | `live_status` | Whether the bridge is reachable. If not, it says why. |
@@ -40,6 +40,7 @@ An independent project, not affiliated with or endorsed by PreSonus or Fender. S
 | `live_inserts` / `live_bypass_insert` | Plug-ins on each channel (slot, name, bypassed), and bypass one slot or the whole rack. |
 | `live_sends` / `live_set_send` | Each channel's sends (destination name, level 0..1 and in dB, mute), and set a level or mute. |
 | `live_plugin_params` / `live_set_plugin_param` | A plug-in's parameters (value, display text like `"2.0:1"`, range, normalised value), and set one by display text, normalised value or raw value. Studio One cannot list a plug-in's parameters, so names come from its presets and Studio One's remote-control map, which covers the PreSonus plug-ins. For other plug-ins, pass the names. |
+| `live_mix_snapshot` | Save the whole mix under a name (every channel's volume, pan, mute, solo, monitoring and send levels, per song), restore it later, or list them. Restore sets only what differs. Record-arm and automation mode are not included. |
 | `live_plugin_snapshot` | Save a plug-in's current settings under a name, and restore them onto the same kind of plug-in on any channel. A stand-in for presets: Studio One's preset commands act on the focused editor window and store through dialogs. |
 | `live_record_setup` | Read and set the metronome (click, precount and its length in bars, preroll), and set record modes (replace, loop takes or mix, takes to layers, input quantize, note erase). Studio One does not expose record modes for reading, so those are reported as set, not confirmed. |
 | `live_set_automation` | Set a channel's automation mode: off, read, touch, latch or write. `live_channels` shows each channel's mode. |

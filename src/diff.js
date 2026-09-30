@@ -94,6 +94,15 @@ export function diffSongs(a, b) {
     }
   }
 
+  // Song notes and channel notes
+  if ((a.notes || '') !== (b.notes || '')) add('song', 'notes', { from: a.notes || '', to: b.notes || '' });
+  const cn = (s) => new Map((s.channelNotes || []).map((n) => [n.channel, n.text]));
+  const na = cn(a);
+  const nb = cn(b);
+  for (const ch of new Set([...na.keys(), ...nb.keys()])) {
+    if (na.get(ch) !== nb.get(ch)) add(ch, 'channel notes', { from: na.get(ch) ?? '', to: nb.get(ch) ?? '' });
+  }
+
   // Automation envelopes (points as stored)
   const env = (s) => new Map((s.automation || []).map((e) => [`${e.channel}/${e.parameter}`, e.points]));
   const ea = env(a);

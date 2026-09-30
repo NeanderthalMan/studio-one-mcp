@@ -22,6 +22,15 @@ test('base to extras: instrument track, automation mode, plug-in settings, envel
   assert.deepEqual(d.find((c) => c.area === 'automation').detail, { fromPoints: 0, toPoints: 2 });
 });
 
+test('song notes and channel notes changes', () => {
+  const a = readSong(fixture({ extras: true }));
+  const b = clone(a);
+  b.notes = 'Verse 1: tighter';
+  b.channelNotes = [{ channel: 'Vox', text: 'Take 3 now' }, { channel: 'Main', text: 'no limiter yet' }];
+  const d = diffSongs(a, b).filter((c) => /notes/.test(c.what));
+  assert.deepEqual(d.map((c) => [c.area, c.what, c.detail.to]), [['song', 'notes', 'Verse 1: tighter'], ['Vox', 'channel notes', 'Take 3 now'], ['Main', 'channel notes', 'no limiter yet']]);
+});
+
 test('renames by id, notes, events, mixer fields, plug-ins, markers and tempo', () => {
   const a = readSong(fixture({ extras: true }));
   const b = clone(a);

@@ -65,6 +65,17 @@ test('instrument part notes from the clip performance (UBJSON), placed by the pa
   assert.equal(summarizeSong(s).tracks.find((t) => t.name === 'Keys').notes, 2);
 });
 
+test('song notes and channel notes (empty ones left out), also in the summary', () => {
+  const s = readSong(fixture({ extras: true }));
+  assert.equal(s.notes, 'Verse 1: keep the breath before the chorus');
+  assert.deepEqual(s.channelNotes, [{ channel: 'Vox', text: 'Take 2 is the keeper' }]);
+  const sum = summarizeSong(s);
+  assert.equal(sum.notes, 'Verse 1: keep the breath before the chorus');
+  assert.deepEqual(sum.channelNotes, ['Vox: Take 2 is the keeper']);
+  const plain = readSong(fixture());
+  assert.deepEqual([plain.notes, plain.channelNotes, summarizeSong(plain).notes], ['', [], undefined]);
+});
+
 test('insert settings from the saved preset; automation mode and envelopes with points', () => {
   const s = readSong(fixture({ extras: true }));
   const vox = s.mixer.find((c) => c.label === 'Vox');

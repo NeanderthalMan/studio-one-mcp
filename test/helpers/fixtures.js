@@ -134,6 +134,13 @@ export function writeSong(path, { title = 'Fixture Song', extras = false } = {})
     files['Presets/Channels/Vox/1 - Pro EQ.fxpreset'] = strToU8('﻿<AudioEffectPreset><Attributes x:id="ParameterData" lffreq="40" lfgain="-3.5"/></AudioEffectPreset>');
     files['Envelopes/Vox/Volume.envelopex'] = encodeUbjson({ bipolar: 0, events: [{ time: 0, value: 0.5 }, { time: 8, value: 1 }] });
     files['Envelopes/Vox/Pan.envelopex'] = encodeUbjson({ bipolar: 1, events: [] });
+    // Song notes and channel notes, as Studio One 5.5.2 lays them out (one item per channel).
+    files['notes.txt'] = strToU8('﻿Verse 1: keep the breath before the chorus');
+    files['notepad.xml'] = strToU8(`﻿<?xml version="1.0" encoding="UTF-8"?>
+<NotepadData>
+	<NotepadItem id="{1}" title="Vox" text="Take 2 is the keeper"/>
+	<NotepadItem id="{2}" title="Main" text=""/>
+</NotepadData>`);
   }
   writeFileSync(path, zipSync(files));
   return path;
