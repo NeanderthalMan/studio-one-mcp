@@ -10,4 +10,13 @@
 		sourceFile="McpEdit.js"
 		functionName="createMcpEdit">
 	</ScriptClass>
+	<!-- Expected as "Track/MCP Track Edit", like the built-in TrackEdit tasks. -->
+	<ScriptClass
+		classID="{6D3C2A1E-8F4B-4C7A-9E21-5B0D7A3F9C13}"
+		category="EditTask"
+		subCategory="TrackEdit"
+		name="MCP Track Edit"
+		sourceFile="McpTrackEdit.js"
+		functionName="createMcpTrackEdit">
+	</ScriptClass>
 </ClassFactory>

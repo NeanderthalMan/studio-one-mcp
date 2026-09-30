@@ -65,7 +65,7 @@ test('no host APIs that are missing or crash on Studio One 5', () => {
 });
 
 test('device scripts never throw (Studio One turns that into an error dialog)', () => {
-  for (const f of ['BridgeCore.js', 'BridgeComponent.js', 'BridgeDevice.js', '../EditTasks/package/McpEdit.js']) {
+  for (const f of ['BridgeCore.js', 'BridgeComponent.js', 'BridgeDevice.js', '../EditTasks/package/McpEdit.js', '../EditTasks/package/McpTrackEdit.js']) {
     const code = read(f).replace(/\/\/.*$/gm, '');
     assert.doesNotMatch(code, /\bthrow\b/, f);
   }
