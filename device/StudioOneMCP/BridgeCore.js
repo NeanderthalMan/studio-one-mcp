@@ -142,6 +142,8 @@ class Bridge {
             case "notes": return this.notes(args);
             case "editNotes": return this.editNotes(args);
             case "trackTask": return this.trackTask(args);
+            case "plugins": return this.plugins(args);
+            case "addPlugin": return this.addPlugin(args);
             case "metronome": return this.metronome(args);
             case "transport": return this.transport(args);
             case "setTransport": return this.setTransport(args);
@@ -361,6 +363,75 @@ class Bridge {
         }
         const mediaType = has(t, "mediaType", "string") ? t.mediaType : null;
         return { track: String(t.name), mediaType: mediaType, parts: parts, truncated: skipped > 0 };
+    }
+
+    // ---- plug-ins by name ------------------------------------------------------
+    //
+    // Studio One's plug-in picker (Host:PlugInMenuParam, as its Add Tracks script
+    // uses) lists installed effects: set a category, step through the values, read
+    // each name from .string, and getSelectedClass() gives the class id. A channel's
+    // Inserts folder takes that id in insertDeviceClass (checked on 5.5.2: it adds
+    // the plug-in). Added this way it is not on the undo stack, and scripts have no
+    // way to remove a plug-in, so removing one is by hand.
+
+    pluginMenu() {
+        if (!Host.Classes || !has(Host.Classes, "createInstance", "function")) return null;
+        const menu = Host.Classes.createInstance("Host:PlugInMenuParam");
+        if (!menu || !has(menu, "setCategory", "function") || !has(menu, "setValue", "function") || !has(menu, "getSelectedClass", "function")) return null;
+        menu.setCategory("AudioEffect");
+        return menu;
+    }
+
+    plugins(args) {
+        const menu = this.pluginMenu();
+        if (!menu) return fail("the plug-in list is not available");
+        const names = [];
+        for (let i = menu.min; i <= menu.max; i++) {
+            menu.setValue(i, true);
+            const n = String(menu.string);
+            if (names.indexOf(n) < 0) names.push(n);
+        }
+        const f = args.filter ? String(args.filter).toLowerCase() : null;
+        return { plugins: f ? names.filter(n => n.toLowerCase().indexOf(f) >= 0) : names };
+    }
+
+    mixerChannel(label) {
+        const con = docObject("Environment/MixerConsole");
+        if (!con || !has(con, "getChannelList", "function")) return fail("the mixer console is not available");
+        const list = con.getChannelList(1);
+        if (!list || !has(list, "getChannel", "function")) return fail("the mixer console is not available");
+        const hits = [];
+        for (let i = 0; i < list.numChannels; i++) {
+            const c = list.getChannel(i);
+            if (c && c.label === label) hits.push(c);
+        }
+        if (hits.length !== 1) return fail(hits.length ? "channel name is ambiguous: " + label : "no channel named " + label);
+        return hits[0];
+    }
+
+    addPlugin(args) {
+        const menu = this.pluginMenu();
+        if (!menu) return fail("the plug-in list is not available");
+        const want = String(args.plugin || "");
+        let exact = -1, loose = -1;
+        for (let i = menu.min; i <= menu.max; i++) {
+            menu.setValue(i, true);
+            const n = String(menu.string);
+            if (n === want && exact < 0) exact = i;
+            if (n.toLowerCase() === want.toLowerCase() && loose < 0) loose = i;
+        }
+        const at = exact >= 0 ? exact : loose;
+        if (at < 0) return fail("no plug-in named " + want + " (live_plugins lists them)");
+        menu.setValue(at, true);
+        const name = String(menu.string);
+        const cls = menu.getSelectedClass();
+        const ch = this.mixerChannel(args.channel);
+        if (isFail(ch)) return ch;
+        const ins = has(ch, "find", "function") ? ch.find("Inserts") : null;
+        if (!ins || !has(ins, "insertDeviceClass", "function")) return fail(args.channel + " has no insert rack to add to");
+        if (!ins.insertDeviceClass(cls)) return fail("Studio One did not add " + name);
+        const rack = this.fromComponent(c => c.inserts({ channel: args.channel }));
+        return { channel: args.channel, added: name, inserts: isFail(rack) || !rack.length ? null : rack[0].inserts };
     }
 
     // Note edits through the "MCP Edit" task (device/EditTasks): the request goes

@@ -37,6 +37,7 @@ An independent project, not affiliated with or endorsed by PreSonus or Fender. S
 | `live_add_track` | Add an audio (mono or stereo), instrument, folder or automation track. |
 | `live_meters` | Peak dB for every channel. With `duration_ms`, it samples during playback and reports the highest peak and any clipping. |
 | `live_save`, `live_undo`, `live_redo` | Save (optionally as a new version), and undo or redo edits, with a step count. Check the result rather than counting undo steps: see [Undo](#undo). |
+| `live_plugins` / `live_add_plugin` | The installed audio effects by name (PreSonus, VST and AU), and add one to a channel's inserts by name. **Adding cannot be undone by script**, and scripts cannot remove a plug-in, so removing one is manual in Studio One (bypass it with `live_bypass_insert` meanwhile). |
 | `live_inserts` / `live_bypass_insert` | Plug-ins on each channel (slot, name, bypassed), and bypass one slot or the whole rack. |
 | `live_sends` / `live_set_send` | Each channel's sends (destination name, level 0..1 and in dB, mute), and set a level or mute. |
 | `live_plugin_params` / `live_set_plugin_param` | A plug-in's parameters (value, display text like `"2.0:1"`, range, normalised value), and set one by display text, normalised value or raw value. Studio One cannot list a plug-in's parameters, so names come from its presets and Studio One's remote-control map, which covers the PreSonus plug-ins. For other plug-ins, pass the names. |

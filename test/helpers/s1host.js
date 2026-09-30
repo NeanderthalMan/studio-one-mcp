@@ -38,6 +38,10 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
     clickOn: param('clickOn', 1), precount: param('precount', 0), preroll: param('preroll', 0), bars: param('bars', 1, { min: 1, max: 16 }),
   };
   const metronome = { params: metro, findParameter: (n) => metro[n] || null };
+  const consoleChannels = tracks.map((t) => {
+    const inserted = [];
+    return { label: t.channel || t.name, inserted, find: (n) => (n === 'Inserts' ? { insertDeviceClass: (cls) => (inserted.push(cls), {}) } : null) };
+  });
   // takeEvents: one events array per take; `events` is shorthand for a single take.
   const makeTrack = (t, i) => {
     const takes = (t.takeEvents || [t.events || []]).map((list) => list.map((e) => ({ ...e })));
@@ -78,19 +82,34 @@ export function fakeDocument({ title = 'Live Song', tracks = [], tempo = 120 } =
     unselectAll: () => { selected = []; },
   };
   return {
-    params, objs, mainTrackList,
+    params, objs, mainTrackList, consoleChannels,
     addTrack: (name) => { objs.push(makeTrack({ name }, objs.length)); layout(); },
     removeTrack: (name) => { const k = objs.findIndex((o) => o.name === name); if (k >= 0) objs.splice(k, 1); layout(); },
     urls: {
       '://studioapp/DocumentManager': { activeDocument: { title, path: { url: `file:///songs/${title}/${title}.song` } } },
       '://hostapp/DocumentManager/ActiveDocument/Environment/TransportPanel': transportPanel,
       '://hostapp/DocumentManager/ActiveDocument/Environment/Metronome': metronome,
+      // Mixer console channels: label, and an Inserts folder that takes a class id.
+      '://hostapp/DocumentManager/ActiveDocument/Environment/MixerConsole': {
+        getChannelList: () => ({ numChannels: consoleChannels.length, getChannel: (i) => consoleChannels[i] }),
+      },
       '://hostapp/DocumentManager/ActiveDocument/TrackList': { mainTrackList },
     },
   };
 }
 
-export function fakeHost({ commands = [], document = null } = {}) {
+// Studio One's plug-in picker as 5.5.2 showed it: setCategory, then values min..max;
+// setValue(i) makes .string the name and getSelectedClass() the class id.
+function fakePluginMenu(plugins) {
+  return {
+    min: 0, max: -1, value: 0, string: '',
+    setCategory(cat) { this.list = cat === 'AudioEffect' ? plugins : []; this.max = this.list.length - 1; },
+    setValue(i) { this.value = i; this.string = this.list[i]?.name ?? ''; },
+    getSelectedClass() { return this.list[this.value]?.id ?? null; },
+  };
+}
+
+export function fakeHost({ commands = [], document = null, plugins = [] } = {}) {
   const files = new Map(); // url string -> contents
   const logs = [];
   const executed = [];
@@ -131,6 +150,7 @@ export function fakeHost({ commands = [], document = null } = {}) {
       },
     },
     Attributes: (pairs) => ({ pairs }),
+    Classes: { createInstance: (name) => (name === 'Host:PlugInMenuParam' ? fakePluginMenu(plugins) : null) },
     Objects: { getObjectByUrl: (url) => (document && document.urls[url]) || null },
     Console: { writeLine: (s) => logs.push(String(s)) },
   };

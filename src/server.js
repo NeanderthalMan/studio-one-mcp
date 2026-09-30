@@ -400,6 +400,20 @@ server.tool(
 );
 
 server.tool(
+  'live_plugins',
+  'The audio-effect plug-ins installed in the running Studio One, by name (PreSonus, VST and AU), optionally filtered. These are the names live_add_plugin takes.',
+  { filter: z.string().optional() },
+  guard((a) => call('plugins', a, { timeoutMs: 10000 })),
+);
+
+server.tool(
+  'live_add_plugin',
+  "Add a plug-in by name (from live_plugins) to a channel's inserts in the running Studio One. Returns the channel's inserts afterwards. Important: this cannot be undone with live_undo, and scripts cannot remove a plug-in, so removing it is manual (in Studio One) — bypass it with live_bypass_insert if you only need it out of the way. Ask before adding when the user has not clearly asked for it.",
+  { channel: z.string().describe('Exact channel label'), plugin: z.string().describe('Plug-in name, e.g. "Pro EQ", "Compressor", "Room Reverb"') },
+  guard((a) => call('addPlugin', a, { timeoutMs: 10000 })),
+);
+
+server.tool(
   'live_bypass_insert',
   'Bypass or un-bypass one plug-in slot on a channel in the running Studio One (slot number from live_inserts), or the whole insert rack with slot "all".',
   { channel: z.string(), slot: z.union([z.number().int(), z.literal('all')]), bypassed: z.boolean() },

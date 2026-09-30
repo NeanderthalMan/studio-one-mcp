@@ -708,6 +708,15 @@ test('punch: set punch-in over a range, read it back, then off with the loop ran
   assert.deepEqual((await call('song')).transport.autopunch, t0.autopunch);
 });
 
+// addPlugin itself is not run here: a plug-in added by script cannot be removed by
+// script (so-bga), so the suite could not clean up. It was checked by hand (Pro EQ).
+test('plugins: the installed effects are listed by name, PreSonus ones included', async () => {
+  const { plugins } = await call('plugins', {}, { timeoutMs: 10000 });
+  assert.ok(plugins.length > 10, `${plugins.length} plug-ins`);
+  for (const n of ['Pro EQ', 'Compressor']) assert.ok(plugins.includes(n), n);
+  assert.deepEqual((await call('plugins', { filter: 'pro eq' })).plugins, ['Pro EQ']);
+});
+
 // Record modes are not exercised: they cannot be read, so they could not be restored.
 test('metronome: flip click and precount length, restore both', async () => {
   const m0 = await call('metronome', {});

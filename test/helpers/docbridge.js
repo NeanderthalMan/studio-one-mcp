@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { fakeHost, fakeDocument, loadCore, MAILBOX } from './s1host.js';
 
-export function setup({ tracks, noSong = false, markers = [0, 300] } = {}) {
+export function setup({ tracks, noSong = false, markers = [0, 300], plugins = [] } = {}) {
   const doc = fakeDocument({
     title: 'Live Song',
     tracks: tracks || [
@@ -92,7 +92,7 @@ export function setup({ tracks, noSong = false, markers = [0, 300] } = {}) {
     const hit = e.find((x) => x.start < at && x.end > at);
     if (hit) { e.push({ name: hit.name, start: at, end: hit.end }); hit.end = at; }
   });
-  const host = fakeHost({ commands, document: noSong ? null : doc });
+  const host = fakeHost({ commands, document: noSong ? null : doc, plugins });
   const { get } = loadCore({ host, config: { mailbox: MAILBOX } });
   const bridge = new (get('Bridge'))({ mailbox: MAILBOX }, null);
   let n = 0;

@@ -136,6 +136,21 @@ test('selectEvents: by track(s), all, none; enables event commands', () => {
   assert.match(ask('selectEvents', {}).error, /required/);
 });
 
+test('plugins: names from the plug-in picker (duplicates once), filtered; addPlugin inserts the class id', () => {
+  const plugins = [{ name: 'Pro EQ', id: '{EQ}' }, { name: 'Compressor', id: '{COMP}' }, { name: 'Melodyne', id: '{MEL-VST}' }, { name: 'Melodyne', id: '{MEL-AU}' }];
+  const { ask, doc } = setup({ plugins, tracks: [{ name: 'Vox' }, { name: 'Gtr' }, { name: 'Gtr' }] });
+  assert.deepEqual(plain(ask('plugins', {}).result).plugins, ['Pro EQ', 'Compressor', 'Melodyne']);
+  assert.deepEqual(plain(ask('plugins', { filter: 'comp' }).result).plugins, ['Compressor']);
+  const r = plain(ask('addPlugin', { channel: 'Vox', plugin: 'pro eq' }).result);
+  assert.equal(r.added, 'Pro EQ');
+  assert.deepEqual(doc.consoleChannels[0].inserted, ['{EQ}']);
+  assert.equal(plain(ask('addPlugin', { channel: 'Vox', plugin: 'Melodyne' }).result).added, 'Melodyne');
+  assert.deepEqual(doc.consoleChannels[0].inserted, ['{EQ}', '{MEL-VST}'], 'the first of two same-named plug-ins');
+  assert.match(ask('addPlugin', { channel: 'Vox', plugin: 'Nope' }).error, /no plug-in named Nope/);
+  assert.match(ask('addPlugin', { channel: 'Bass', plugin: 'Pro EQ' }).error, /no channel named Bass/);
+  assert.match(ask('addPlugin', { channel: 'Gtr', plugin: 'Pro EQ' }).error, /ambiguous/);
+});
+
 test('metronome: read, set booleans and precount bars, validate range', () => {
   const { ask } = setup();
   assert.deepEqual(plain(ask('metronome', {}).result), { click: true, precount: false, preroll: false, precountBars: 1 });
