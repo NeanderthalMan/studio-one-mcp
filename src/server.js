@@ -20,6 +20,7 @@ import { tempo } from './tempo.js';
 import { trackEdit, addBus } from './tracks.js';
 import { recordSetup } from './record.js';
 import { snapshot } from './snapshots.js';
+import { mixSnapshot } from './mixsnap.js';
 import { bounce } from './bounce.js';
 import { diffSongs } from './diff.js';
 import { gridBeats } from './grid.js';
@@ -534,6 +535,13 @@ server.tool(
   "Bounce all events on one track in the running Studio One: inPlace renders them into a single new event (with plug-ins), toNewTrack renders them onto a new track of the same name and mutes the originals. No dialogs; one live_undo reverts it, but the rendered .wav stays in the song's Bounces folder. Exporting a mixdown or stems is not offered: those open dialogs.",
   { track: z.string(), mode: z.enum(['inPlace', 'toNewTrack']).optional() },
   guard((a) => bounce(call, a)),
+);
+
+server.tool(
+  'live_mix_snapshot',
+  "Save the whole mix of the running song under a name (every channel's volume, pan, mute, solo, input monitoring, and each send's level and mute), restore it later, or list this song's snapshots. Restore sets only what differs. Record-arm and automation mode are not included. Mixer changes are not reverted by one live_undo; restore a snapshot instead.",
+  { action: z.enum(['save', 'restore', 'list']), name: z.string().optional() },
+  guard((a) => mixSnapshot(call, a)),
 );
 
 server.tool(

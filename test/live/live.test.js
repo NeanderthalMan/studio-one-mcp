@@ -19,6 +19,7 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { snapshot } from '../../src/snapshots.js';
+import { mixSnapshot } from '../../src/mixsnap.js';
 
 let channels;
 let testChannel;
@@ -632,6 +633,19 @@ test('add a bus for one track, then undo removes it and restores the routing', a
   const chans1 = await call('channels');
   assert.deepEqual(chans1.map((c) => c.label), chans0.map((c) => c.label), 'the bus is gone');
   assert.equal(chans1.find((c) => c.label === track.channel).output, out0);
+});
+
+test('mix snapshot: save, change a channel volume, restore brings it back', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 's1mix-live-'));
+  const v0 = (await call('channels')).find((c) => c.label === testChannel.label).volume;
+  await mixSnapshot(call, { action: 'save', name: 'live test' }, { dir });
+  try {
+    await call('setChannel', { channel: testChannel.label, field: 'volume', value: v0 > 0.5 ? 0.25 : 0.75 });
+  } finally {
+    const r = await mixSnapshot(call, { action: 'restore', name: 'live test' }, { dir });
+    assert.ok(r.changes.includes(`${testChannel.label} volume`), JSON.stringify(r.changes));
+  }
+  assert.equal((await call('channels')).find((c) => c.label === testChannel.label).volume, v0);
 });
 
 // Record modes are not exercised: they cannot be read, so they could not be restored.
