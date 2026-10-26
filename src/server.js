@@ -17,7 +17,7 @@ import { midiPort } from './midi.js';
 import { pluginParamNames } from './plugins.js';
 import { arranger, listMacros, runMacro } from './arranger.js';
 import { tempo } from './tempo.js';
-import { trackEdit, addBus, trackTask, addInstrumentTrack, addPlugin, addFxSend } from './tracks.js';
+import { trackEdit, addBus, trackTask, addInstrumentTrack, addPlugin, addFxSend, createPart, addNotes } from './tracks.js';
 import { liveEvents } from './events.js';
 import { timeSignature } from './signatures.js';
 import { writeAutomation } from './automation.js';
@@ -195,7 +195,7 @@ const NOTE_FILTER = z
 
 server.tool(
   'live_edit_notes',
-  "Edit the notes of an instrument track's parts in the running Studio One, through the MCP Edit task (installed with the device). Operations run in order: transpose {semitones}, velocity {set 1-127 | add}, move {beats}, length {set beats | scale}, quantize {grid like 1/16, 1/8T (triplet) or 1/8. (dotted), strength 0-1; note starts only, Studio One's own quantize setting is left alone}, delete (needs a filter), add {notes: [{pitch, beat, length, velocity}]}. Each can take a filter (pitch, pitches, from/to beats). Beats are the ones live_notes reports. Returns what each operation touched and the notes afterwards. One live_undo per operation, usually; check with live_notes.",
+  "Edit the notes of an instrument track's parts in the running Studio One, through the MCP Edit task (installed with the device). Operations run in order: transpose {semitones}, velocity {set 1-127 | add}, move {beats}, length {set beats | scale}, quantize {grid like 1/16, 1/8T (triplet) or 1/8. (dotted), strength 0-1; note starts only, Studio One's own quantize setting is left alone}, delete (needs a filter), add {notes: [{pitch, beat, length, velocity}]} (into the first part with notes; for an empty part or a particular one use live_add_notes or live_create_part). Each can take a filter (pitch, pitches, from/to beats). Beats are the ones live_notes reports. Returns what each operation touched and the notes afterwards. One live_undo per operation, usually; check with live_notes.",
   {
     track: z.string(),
     ops: z.array(
@@ -460,6 +460,24 @@ server.tool(
   'Add an instrument track in the running Studio One with a new instance of an instrument (by name, from live_plugins with kind "instrument", e.g. "Mai Tai", "Presence"), optionally named. One live_undo removes the track and the instrument.',
   { instrument: z.string(), name: z.string().optional().describe('Track name (default: the instrument name)') },
   guard((a) => addInstrumentTrack(call, a)),
+);
+
+const PART_NOTES = z
+  .array(z.object({ pitch: z.number().int().min(0).max(127), beat: z.number().min(0), length: z.number().positive(), velocity: z.number().int().min(1).max(127).optional() }))
+  .describe('Notes: pitch (middle C = 60), beat and length in quarter-note beats from the start of the part, velocity 1-127 (default 100)');
+
+server.tool(
+  'live_create_part',
+  'Make an instrument part (MIDI clip) on an instrument track in the running Studio One, from start to end, and optionally fill it with notes. Works on an empty track, which live_edit_notes cannot (its edit task needs a part with notes). Note beats count from the start of the part. One live_undo removes the part and its notes.',
+  { track: z.string(), start: TIME, end: TIME, notes: PART_NOTES.optional() },
+  guard((a) => createPart(call, a)),
+);
+
+server.tool(
+  'live_add_notes',
+  "Add notes to one part of an instrument track in the running Studio One, chosen by number (in time order, from live_events) or name; the part may be empty. Note beats count from the start of that part (live_notes reports song beats). Use this rather than live_edit_notes add when a track has more than one part: that adds into the first part.",
+  { track: z.string(), part: z.union([z.number().int(), z.string()]), notes: PART_NOTES },
+  guard((a) => addNotes(call, a)),
 );
 
 server.tool(

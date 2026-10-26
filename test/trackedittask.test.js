@@ -210,3 +210,86 @@ test('renameMarker by number; the eval probe is off without allowEval', () => {
   assert.deepEqual(s.log, [['rename', 'Drop']]);
   assert.match(results[1].error, /eval is disabled/);
 });
+
+// ---- parts and notes ----------------------------------------------------------------
+
+// The song above plus an instrument track, with MusicPartFunctions.addMusicPart(start, end, track)
+// and the MusicFunctions note set, as probed on 5.5.2.
+function partsSong() {
+  const s = song();
+  const t = (sec) => ({ seconds: sec, musical: sec * 2, as: (f) => (f === 2 ? sec * 2 : sec) });
+  const keys = { name: 'Keys', mediaType: 'Music', parentFolderID: '', events: [] };
+  keys.createIterator = () => { let k = 0; return { next: () => keys.events[k++] || null }; };
+  s.tracks.push(keys);
+  const parts = {
+    addMusicPart: (start, end, track) => {
+      const p = { name: track.name, startTime: t(start.seconds), endTime: t(end.seconds), notes: [] };
+      track.events.push(p);
+      s.log.push(['part', start.seconds, end.seconds]);
+      return p;
+    },
+  };
+  const music = {
+    createEvent: (kind) => (kind === 'Note' ? { pitch: 0, velocity: 0, length: 0, beat: 0 } : null),
+    insertEvent: (part, n) => part.notes.push(n),
+    modifyPitch: (n, p) => (n.pitch = p),
+    modifyVelocity: (n, v) => (n.velocity = Math.round(v * 127)),
+    resizeEvent: (n, len) => (n.length = len),
+    moveEvent: (n, beat) => (n.beat = beat),
+  };
+  const make = s.context.functions.root.createFunctions;
+  s.context.functions.root.createFunctions = (n) => (n === 'MusicPartFunctions' ? parts : n === 'MusicFunctions' ? music : make(n));
+  return { ...s, keys };
+}
+
+function runParts(ops) {
+  const t = load();
+  const s = partsSong();
+  t.request(ops);
+  t.task.performEdit(s.context);
+  return { results: t.result().results, s };
+}
+
+test('createPart makes a part from start to end and fills it; beats count from the part start', () => {
+  const { results, s } = runParts([
+    { op: 'createPart', track: 'Keys', start: 16, end: 32, notes: [{ pitch: 36, beat: 0, length: 0.25, velocity: 110 }, { pitch: 200, beat: 4, length: 1 }] },
+    { op: 'createPart', track: 'Keys', start: 0, end: 8 },
+  ]);
+  assert.deepEqual(s.log.filter(([k]) => k === 'part'), [['part', 16, 32], ['part', 0, 8]]);
+  assert.deepEqual(results[0].part, { number: 1, name: 'Keys', start: 16, end: 32, length: 16, muted: false });
+  assert.equal(results[0].added, 2);
+  assert.deepEqual(s.keys.events[0].notes, [{ pitch: 36, velocity: 110, length: 0.25, beat: 0 }, { pitch: 127, velocity: 100, length: 1, beat: 4 }]);
+  // The empty part is made too, and numbered in time order.
+  assert.equal(results[1].added, 0);
+  assert.equal(results[1].part.number, 1);
+  assert.deepEqual(s.keys.events[1].notes, []);
+});
+
+test('createPart refuses audio tracks, bad ranges and unknown tracks without making anything', () => {
+  const { results, s } = runParts([
+    { op: 'createPart', track: 'Gtr', start: 0, end: 4 },
+    { op: 'createPart', track: 'Keys', start: 4, end: 4 },
+    { op: 'createPart', track: 'Bass', start: 0, end: 4 },
+  ]);
+  assert.match(results[0].error, /Gtr is not an instrument track/);
+  assert.match(results[1].error, /end after start/);
+  assert.match(results[2].error, /no track named Bass/);
+  assert.deepEqual(s.keys.events, []);
+});
+
+test('addNotes goes into the part asked for, by number or name; bad notes are reported and skipped', () => {
+  const { results, s } = runParts([
+    { op: 'createPart', track: 'Keys', start: 0, end: 8 },
+    { op: 'createPart', track: 'Keys', start: 8, end: 16 },
+    { op: 'addNotes', track: 'Keys', part: 2, notes: [{ pitch: 60, beat: 1, length: 0.5 }, { pitch: 62, beat: -1, length: 1 }] },
+    { op: 'addNotes', track: 'Keys', part: 3, notes: [{ pitch: 60, beat: 0, length: 1 }] },
+    { op: 'addNotes', track: 'Keys', part: 1, notes: [] },
+  ]);
+  assert.equal(results[2].part.start, 8);
+  assert.equal(results[2].added, 1);
+  assert.match(results[2].errors[0], /note 2 needs pitch, beat >= 0/);
+  assert.deepEqual(s.keys.events[0].notes, []);
+  assert.deepEqual(s.keys.events[1].notes.map((n) => [n.pitch, n.beat]), [[60, 1]]);
+  assert.match(results[3].error, /part 3 does not exist \(there are 2\)/);
+  assert.match(results[4].error, /notes: one or more/);
+});

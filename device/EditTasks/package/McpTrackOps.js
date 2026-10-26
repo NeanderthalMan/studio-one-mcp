@@ -248,6 +248,91 @@ mtoOps.events = function (context, op) {
 	return { track: op.track, events: out };
 };
 
+// ---- instrument parts and notes -----------------------------------------------------
+//
+// Seen on Studio One 5.5.2 (probed 2026-10-24):
+//  - MusicPartFunctions.addMusicPart(start, end, track) makes an empty part and
+//    returns it; start and end are MediaTimes. Other argument orders do nothing.
+//  - The MCP Edit task (Musical Functions) is disabled while the selected part has
+//    no notes, and it adds into the first selected note's part. So notes for a new
+//    or a particular part go in here: MusicFunctions has the same createEvent /
+//    insertEvent / modify* set that an edit task gets, and moveEvent takes beats
+//    from the start of the part.
+
+function mtoMusicFunctions(context) {
+	var root = context.functions ? context.functions.root : null;
+	var mf = root && mtoFn(root, "createFunctions") ? root.createFunctions("MusicFunctions") : null;
+	var need = ["createEvent", "insertEvent", "modifyPitch", "modifyVelocity", "resizeEvent", "moveEvent"];
+	for (var i = 0; i < need.length; i++) if (!mtoFn(mf, need[i])) return null;
+	return mf;
+}
+
+function mtoClamp(x, lo, hi) { return x < lo ? lo : x > hi ? hi : x; }
+
+// notes: [{ pitch, beat (from the part start), length (beats), velocity? }]. Returns { added, errors }.
+function mtoInsertNotes(mf, part, notes) {
+	var added = 0, errors = [];
+	mf.executeImmediately = true;
+	for (var i = 0; i < notes.length; i++) {
+		var n = notes[i];
+		if (!n || typeof n.pitch !== "number" || typeof n.beat !== "number" || n.beat < 0 || typeof n.length !== "number" || n.length <= 0) {
+			errors.push("note " + (i + 1) + " needs pitch, beat >= 0 and length > 0");
+			continue;
+		}
+		var note = mf.createEvent("Note");
+		if (!note) { errors.push("Studio One did not make a note"); break; }
+		mf.insertEvent(part, note);
+		mf.modifyPitch(note, mtoClamp(Math.round(n.pitch), 0, 127));
+		mf.modifyVelocity(note, mtoClamp(typeof n.velocity === "number" ? Math.round(n.velocity) : 100, 1, 127) / 127);
+		mf.resizeEvent(note, n.length);
+		mf.moveEvent(note, n.beat);
+		added++;
+	}
+	mf.executeImmediately = false;
+	return { added: added, errors: errors };
+}
+
+function mtoNoteList(op) { return op.notes && typeof op.notes.length === "number" ? op.notes : []; }
+
+// { track, start, end (seconds), notes? }: an instrument part, filled with the notes if given.
+mtoOps.createPart = function (context, op) {
+	var f = context.functions;
+	var root = f ? f.root : null;
+	var t = mtoTrack(context, op.track);
+	if (t.error) return t;
+	if (t.track.mediaType && t.track.mediaType !== "Music") return { error: op.track + " is not an instrument track" };
+	if (typeof op.start !== "number" || typeof op.end !== "number" || op.start < 0 || op.end <= op.start) return { error: "start and end are seconds, end after start" };
+	var mp = root && mtoFn(root, "createFunctions") ? root.createFunctions("MusicPartFunctions") : null;
+	if (!mtoFn(mp, "addMusicPart")) return { error: "parts cannot be made here" };
+	var notes = mtoNoteList(op);
+	var mf = notes.length ? mtoMusicFunctions(context) : null;
+	if (notes.length && !mf) return { error: "notes cannot be added here" };
+	var s = mtoTime(context, op.start), e = mtoTime(context, op.end);
+	if (!s || !e) return { error: "no MediaTime" };
+	mp.executeImmediately = true;
+	var part = mp.addMusicPart(s, e, t.track);
+	mp.executeImmediately = false;
+	if (!part) return { error: "Studio One did not make the part" };
+	var r = notes.length ? mtoInsertNotes(mf, part, notes) : { added: 0, errors: [] };
+	var list = mtoEvents(t.track), number = 0;
+	for (var i = 0; i < list.length; i++) if (list[i] === part) number = i + 1;
+	return { part: mtoEventInfo(part, number), added: r.added, errors: r.errors };
+};
+
+// { track, part (number in time order or name), notes }: notes into that part, empty or not.
+mtoOps.addNotes = function (context, op) {
+	var t = mtoTrack(context, op.track);
+	if (t.error) return t;
+	var pick = mtoPickEvent(mtoEvents(t.track), op.part, "part");
+	if (pick.error) return pick;
+	var notes = mtoNoteList(op);
+	if (!notes.length) return { error: "notes: one or more { pitch, beat, length }" };
+	var mf = mtoMusicFunctions(context);
+	if (!mf) return { error: "notes cannot be added here" };
+	var r = mtoInsertNotes(mf, pick.event, notes);
+	return { part: mtoEventInfo(pick.event, pick.number), added: r.added, errors: r.errors };
+};
+
 // { track, event, to?, toTrack?, gainDb?, addGainDb?, fadeIn?, fadeOut? }: edits in that order.
 mtoOps.editEvent = function (context, op) {
 	var f = context.functions;

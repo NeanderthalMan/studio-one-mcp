@@ -4,6 +4,8 @@
 //  - Remove Track is one undo step and asked nothing for an empty track;
 //  - Track/Group Selected Tracks opens a name dialog, so grouping is not offered.
 
+import { manyToSeconds } from './time.js';
+
 const hex = (rgb) => `#${(rgb & 0xffffff).toString(16).padStart(6, '0')}`;
 export const toArgb = (color) => {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(color));
@@ -113,6 +115,21 @@ export async function trackEdit(call, { track, action, name, color, to, folder, 
 export async function addInstrumentTrack(call, { instrument, name }) {
   const r = await trackTask(call, { op: 'addInstrumentTrack', instrument, name });
   return { track: r.track, instrument: r.instrument, channel: r.channel, connected: r.connected, note: 'One live_undo removes the track and the instrument.' };
+}
+
+// An instrument part from start to end (seconds or bars), optionally with notes at
+// beats from the part start, through the MCP Track Edit task: an empty part is
+// fine, which the MCP Edit task (live_edit_notes) cannot start from.
+export async function createPart(call, { track, start, end, notes = [] }) {
+  const [s, e] = await manyToSeconds(call, [start, end]);
+  const r = await trackTask(call, { op: 'createPart', track, start: s, end: e, notes });
+  return { track, part: r.part, added: r.added, errors: r.errors, note: 'One live_undo removes the part and its notes.' };
+}
+
+// Notes into one part of a track (number in time order, or name), empty or not.
+export async function addNotes(call, { track, part, notes }) {
+  const r = await trackTask(call, { op: 'addNotes', track, part, notes });
+  return { track, part: r.part, added: r.added, errors: r.errors, note: 'One live_undo removes the added notes.' };
 }
 
 // A plug-in on a channel's inserts, through DeviceEditFunctions like Studio One's
