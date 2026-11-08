@@ -30,6 +30,8 @@ import { bounce } from './bounce.js';
 import { diffSongs } from './diff.js';
 import { gridBeats } from './grid.js';
 import { version } from './version.js';
+import { studioOneProfiles } from './paths.js';
+import { readDeviceConfig } from './setup/device.js';
 
 const json = (value) => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 1) }] });
 const fail = (message) => ({ content: [{ type: 'text', text: message }], isError: true });
@@ -115,7 +117,11 @@ server.tool(
     if (!s.loaded) return { connected: false, ...s };
     try {
       const ping = await call('ping', {}, { timeoutMs: 2500 });
-      return { connected: true, midiPort: midiPort(), ping, ...s };
+      const installed = studioOneProfiles().map((p) => readDeviceConfig(p)?.build).find(Boolean);
+      const restart = installed && ping?.build !== installed
+        ? { warning: 'Studio One is running an older MCP Bridge than the one installed; restart Studio One to load it (newer tools fail with "unknown op" until then).' }
+        : {};
+      return { connected: true, midiPort: midiPort(), ping, ...restart, ...s };
     } catch (e) {
       return { connected: false, error: e.message, ...s };
     }
