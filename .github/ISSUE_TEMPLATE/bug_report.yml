@@ -1,0 +1,55 @@
+name: Bug report
+description: Something doesn't work, or works differently than the README says
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! This project is developed against **Studio One 5.5.2 on macOS**, so reports from other versions and from Windows are especially useful.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: The tool you called (e.g. `live_add_track`), what you asked for, and what you got. Paste the error text if there was one.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+  - type: input
+    id: s1version
+    attributes:
+      label: Studio One version
+      description: Help → About Studio One. For example "5.5.2", "6.6", "7.1", "Studio Pro 8.0".
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Windows]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: studio-one-mcp version
+      description: "The first line of doctor's output, or the commit if you run a clone"
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      description: Claude Code, Claude Desktop, Cursor, …
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `npx -y studio-one-mcp doctor`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: scripting
+    attributes:
+      label: Did Studio One show a "Scripting Error" dialog?
+      description: If so, paste its text. Studio One's console (View → Console, if enabled) may also show `studio-one-mcp:` lines.

@@ -1,0 +1,20 @@
+name: Feature request
+description: Something you'd like Claude to be able to do in Studio One
+labels: [enhancement]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: What would you like to do?
+      description: Describe it as a request you'd make to Claude, e.g. "add a compressor to every drum track and set the threshold to -12 dB".
+    validations:
+      required: true
+  - type: textarea
+    id: manual
+    attributes:
+      label: How do you do it in Studio One today?
+      description: Menu path, keyboard shortcut or macro. This tells us which Studio One command or scripting object to look for.
+  - type: input
+    id: s1version
+    attributes:
+      label: Studio One version
