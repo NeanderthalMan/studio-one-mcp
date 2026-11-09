@@ -1,22 +1,36 @@
 // `studio-one-mcp doctor`: check every link in the chain and say how to fix
 // the first broken one. Read-only.
 import { studioOneProfiles, songRoots, mailboxDir } from '../paths.js';
-import { deviceStatus } from './device.js';
+import { deviceStatus, readDeviceConfig } from './device.js';
 import {
   midiOutputs, pickMidiPort, studioOneRunning, claudeCodeAvailable, claudeCodeRegistered,
   desktopConfigPath, desktopRegistered, isMac,
 } from './checks.js';
 import { bridgeStatus, call } from '../bridge.js';
+import { version } from '../version.js';
 
 const PASS = 'pass';
 const FAIL = 'fail';
 const WARN = 'warn';
 const INFO = 'info';
 
+// Is Studio One running the bridge that is installed? It loads the device only
+// at startup, so after setup (or an upgrade) the old one keeps answering pings
+// until a restart — and the new tools fail with "unknown op". Returns
+// [status, detail, fix] or null when there is nothing to compare.
+export function bridgeBuildCheck(pong, installedBuild) {
+  if (!installedBuild) return null;
+  const running = pong?.build;
+  if (running === installedBuild) return [PASS, `build ${running}`, null];
+  return [FAIL, running ? `running build ${running}, installed ${installedBuild}` : 'running an older bridge than the one installed',
+    'Restart Studio One: it loads the bridge device only at startup'];
+}
+
 export async function runChecks({ profile, live = true } = {}) {
   const results = [];
   const add = (name, status, detail, fix) => results.push({ name, status, detail, fix });
 
+  add('studio-one-mcp', INFO, version, null);
   const major = Number(process.versions.node.split('.')[0]);
   add('Node.js', major >= 20 ? PASS : FAIL, process.versions.node, major >= 20 ? null : 'Install Node.js 20 or newer');
 
@@ -60,8 +74,10 @@ export async function runChecks({ profile, live = true } = {}) {
     else {
       try {
         const t0 = Date.now();
-        await call('ping', {}, { timeoutMs: 2500 });
+        const pong = await call('ping', {}, { timeoutMs: 2500 });
         add('Bridge answers', PASS, `ping ${Date.now() - t0} ms`, null);
+        const loaded = bridgeBuildCheck(pong, chosen ? readDeviceConfig(chosen)?.build : null);
+        if (loaded) add('Bridge version loaded', ...loaded);
         // Studio One loads extensions only at startup: installed is not the same as loaded.
         if (editTasks?.installed) {
           try {

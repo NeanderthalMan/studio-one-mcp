@@ -131,7 +131,7 @@ class Bridge {
 
     handle(op, args) {
         switch (op) {
-            case "ping": return { pong: true, session: this.session, time: Date.now() };
+            case "ping": return { pong: true, session: this.session, time: Date.now(), build: this.config.build || null };
             case "channels": return this.fromComponent(c => c.channels());
             case "setChannel": return this.fromComponent(c => c.setChannel(args));
             case "command": return this.command(args);

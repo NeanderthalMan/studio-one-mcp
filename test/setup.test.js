@@ -7,12 +7,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { installDevice, deviceStatus, deviceTarget, fileUrl, readDeviceConfig, editTasksStatus, editTasksTarget } from '../src/setup/device.js';
+import { installDevice, deviceBuild, deviceStatus, deviceTarget, fileUrl, readDeviceConfig, editTasksStatus, editTasksTarget } from '../src/setup/device.js';
 import { rmSync } from 'node:fs';
 import { zipSync, unzipSync, strToU8 } from 'fflate';
 import { pickMidiPort, serverEntry, claudeCodeAddArgs, mergeDesktopConfig, readDesktopConfig, serverPath, runningFromNpx } from '../src/setup/checks.js';
 import { version } from '../src/version.js';
-import { formatReport } from '../src/setup/doctor.js';
+import { formatReport, bridgeBuildCheck } from '../src/setup/doctor.js';
 
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
 
@@ -125,6 +125,23 @@ test('doctor report: icons, fixes under failures, summary', () => {
   assert.match(out, /✖ Virtual MIDI port\s+none\n\s+→ Turn on IAC/);
   assert.match(out, /1 problem\(s\) found\./);
   assert.match(formatReport([{ name: 'a', status: 'pass', detail: '' }]), /All good\./);
+});
+
+// so-2o6: setup installs new files while Studio One keeps running the old bridge.
+test('doctor: the running bridge build is compared with the installed one', () => {
+  const profile = tmp('s1prof-');
+  installDevice({ profile, mailbox: join(profile, 'mb') });
+  const installed = readDeviceConfig(profile).build;
+  assert.equal(installed, deviceBuild());
+  assert.match(installed, /^[0-9a-f]{12}$/);
+  assert.equal(bridgeBuildCheck({ pong: true, build: installed }, installed)[0], 'pass');
+  const old = bridgeBuildCheck({ pong: true }, installed);
+  assert.equal(old[0], 'fail');
+  assert.match(old[2], /Restart Studio One/);
+  assert.match(bridgeBuildCheck({ pong: true, build: 'aaaaaaaaaaaa' }, installed)[1], /running build aaaaaaaaaaaa, installed/);
+  assert.equal(bridgeBuildCheck({ pong: true }, undefined), null, 'a pre-0.4 install has no build to compare');
+  writeFileSync(join(deviceTarget(profile), 'BridgeCore.js'), '// changed\n');
+  assert.notEqual(deviceBuild(deviceTarget(profile)), installed, 'the fingerprint follows the files');
 });
 
 const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));

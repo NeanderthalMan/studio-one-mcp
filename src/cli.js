@@ -7,10 +7,14 @@ const usage = `studio-one-mcp            run the MCP server (stdio)
 studio-one-mcp setup      guided install: device, virtual MIDI port, MCP client
                           [--yes] [--dry-run] [--profile <dir>]
 studio-one-mcp doctor     check every link in the chain, with fixes
-studio-one-mcp uninstall  remove the bridge device [--profile <dir>]`;
+studio-one-mcp uninstall  remove the bridge device [--profile <dir>]
+studio-one-mcp --version  print the version`;
 
 if (!cmd) {
   await import('./server.js');
+} else if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
+  const { version } = await import('./version.js');
+  console.log(version);
 } else if (cmd === 'setup') {
   const { setup } = await import('./setup/wizard.js');
   process.exit(await setup(rest));

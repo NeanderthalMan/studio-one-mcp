@@ -9,7 +9,7 @@ Studio One has no public API, no OSC, and no network scripting. This server comb
 | **`song_*` tools** | Parse `.song` files, which are zip archives of XML: tempo map, meter, markers, arranger sections, tracks, takes, clips, mixer, plug-in inserts and media. | No. Reflects the last save or autosave. |
 | **`live_*` tools** | A small control-surface device, installed into Studio One, that answers requests through a local **file mailbox**. It uses Studio One's own JavaScript device SDK. | Yes |
 
-Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Windows and for Studio One 6/7 and Studio Pro 8 are wired in but untested.
+Status: early. Developed against **Studio One 5.5.2 on macOS**. Paths for Windows and for Studio One 6/7 and Studio Pro 8 are wired in but untested. If you run one of those, a [bug report](https://github.com/NeanderthalMan/studio-one-mcp/issues/new/choose) with your `doctor` output helps a lot, even when everything works. See [CONTRIBUTING.md](CONTRIBUTING.md) to help with code.
 
 An independent project, not affiliated with or endorsed by PreSonus or Fender. Studio One is their trademark.
 
@@ -104,7 +104,7 @@ If something doesn't work, run:
 npx -y studio-one-mcp doctor   # from a clone also: npm run doctor
 ```
 
-It checks every link in the chain and tells you how to fix the first broken one: Node, profile, Songs folder, device installed and current, edit-task extension installed and current, MIDI port, Studio One running, bridge loaded, bridge answering, the edit task loaded in Studio One, and MCP client registration. `setup` treats the device and the extension as one install: if either is missing or out of date (for example after an update), it offers to reinstall both.
+It checks every link in the chain and tells you how to fix the first broken one: Node, profile, Songs folder, device installed and current, edit-task extension installed and current, MIDI port, Studio One running, bridge loaded, bridge answering, the running bridge matching the installed one (Studio One loads it only at startup, so after an update it keeps running the old one until you restart), the edit task loaded in Studio One, and MCP client registration. `setup` treats the device and the extension as one install: if either is missing or out of date (for example after an update), it offers to reinstall both.
 
 To remove the device and the extension: `npx -y studio-one-mcp uninstall`, then remove **MCP Bridge** under External Devices.
 
